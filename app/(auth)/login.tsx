@@ -7,7 +7,6 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,12 +15,15 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { signIn } = useAuth();
   const router = useRouter();
 
   const handleLogin = async () => {
+    setError(null);
+
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setError('Please enter your email and password.');
       return;
     }
 
@@ -29,8 +31,17 @@ export default function Login() {
     try {
       await signIn(email, password);
       router.replace('/(tabs)');
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to sign in');
+    } catch (err: any) {
+      const msg: string = err.message ?? '';
+      if (
+        msg.toLowerCase().includes('invalid login credentials') ||
+        msg.toLowerCase().includes('invalid email or password') ||
+        msg.toLowerCase().includes('email not confirmed')
+      ) {
+        setError('Incorrect email or password. Please try again.');
+      } else {
+        setError(msg || 'Failed to sign in. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -51,10 +62,10 @@ export default function Login() {
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, error && styles.inputError]}
               placeholder="your@email.com"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(v) => { setEmail(v); setError(null); }}
               autoCapitalize="none"
               keyboardType="email-address"
               placeholderTextColor="#9CA3AF"
@@ -64,14 +75,20 @@ export default function Login() {
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Password</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, error && styles.inputError]}
               placeholder="••••••••"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(v) => { setPassword(v); setError(null); }}
               secureTextEntry
               placeholderTextColor="#9CA3AF"
             />
           </View>
+
+          {error && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -138,6 +155,21 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     color: '#111827',
+  },
+  inputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FFF8F8',
+  },
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 8,
+    padding: 12,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#DC2626',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   button: {
     backgroundColor: '#10B981',
