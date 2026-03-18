@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Modal,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { plaidApi } from '@/lib/plaid';
+import { PlaidLink } from '@/components/PlaidLink';
 import {
   CreditCard,
   Building2,
@@ -16,6 +21,8 @@ import {
   Clock,
   XCircle,
   Wallet as WalletIcon,
+  Link as LinkIcon,
+  RefreshCw,
 } from 'lucide-react-native';
 
 interface Transaction {
@@ -44,7 +51,15 @@ export default function Wallet() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const fetchWalletData = async () => {
+  // Plaid Link state
+  const [plaidLinked, setPlaidLinked] = useState(false);
+  const [institutionName, setInstitutionName] = useState<string | null>(null);
+  const [showPlaidLink, setShowPlaidLink] = useState(false);
+  const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [linkTokenLoading, setLinkTokenLoading] = useState(false);
+  const [syncingTransactions, setSyncingTransactions] = useState(false);
+
+  const fetchWalletData = useCallback(async () => {
     if (!user) return;
 
     try {
@@ -72,8 +87,10 @@ export default function Wallet() {
           .select('payment_status')
           .eq('challenge_id', participantData.challenge_id);
 
-        const paidCount = allParticipants?.filter(p => p.payment_status === 'paid').length || 0;
-        const pendingCount = allParticipants?.filter(p => p.payment_status === 'pending').length || 0;
+        const paidCount =
+          allParticipants?.filter((p) => p.payment_status === 'paid').length ?? 0;
+        const pendingCount =
+          allParticipants?.filter((p) => p.payment_status === 'pending').length ?? 0;
 
         setPrizePoolStatus({
           total_pool: challengeData.prize_pool,
@@ -83,21 +100,72 @@ export default function Wallet() {
 
         setConnected(participantData.payment_status === 'paid');
       }
+
+      // Load Plaid linked account info
+      const linkedAccount = await plaidApi.getLinkedAccount();
+      setPlaidLinked(!!linkedAccount);
+      setInstitutionName(linkedAccount?.institution_name ?? null);
     } catch (error) {
       console.error('Error fetching wallet data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchWalletData();
-  }, [user]);
+  }, [fetchWalletData]);
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchWalletData();
+  };
+
+  const handleConnectBank = async () => {
+    setLinkTokenLoading(true);
+    try {
+      const token = await plaidApi.createLinkToken();
+      setLinkToken(token);
+      setShowPlaidLink(true);
+    } catch (error: any) {
+      Alert.alert('Connection Error', error.message || 'Failed to start bank connection.');
+    } finally {
+      setLinkTokenLoading(false);
+    }
+  };
+
+  const handlePlaidSuccess = async (publicToken: string, metadata: any) => {
+    setShowPlaidLink(false);
+    setLinkToken(null);
+    try {
+      await plaidApi.exchangeToken(publicToken, metadata);
+      // Sync transactions immediately after linking
+      await plaidApi.syncTransactions();
+      const linkedAccount = await plaidApi.getLinkedAccount();
+      setPlaidLinked(true);
+      setInstitutionName(linkedAccount?.institution_name ?? null);
+      Alert.alert('Bank Connected', 'Your bank account is now linked and transactions are syncing.');
+    } catch (error: any) {
+      Alert.alert('Connection Error', error.message || 'Failed to link bank account.');
+    }
+  };
+
+  const handlePlaidExit = () => {
+    setShowPlaidLink(false);
+    setLinkToken(null);
+  };
+
+  const handleSyncTransactions = async () => {
+    setSyncingTransactions(true);
+    try {
+      const count = await plaidApi.syncTransactions();
+      Alert.alert('Synced', `${count} transaction${count !== 1 ? 's' : ''} synced from your bank.`);
+    } catch (error: any) {
+      Alert.alert('Sync Error', error.message || 'Failed to sync transactions.');
+    } finally {
+      setSyncingTransactions(false);
+    }
   };
 
   const getStatusIcon = (status: string) => {
@@ -176,13 +244,37 @@ export default function Wallet() {
         <Text style={styles.headerTitle}>Wallet</Text>
       </View>
 
+      {/* Plaid Link Modal */}
+      <Modal
+        visible={showPlaidLink && !!linkToken}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={handlePlaidExit}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={handlePlaidExit}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Connect Bank Account</Text>
+            <View style={{ width: 60 }} />
+          </View>
+          {linkToken && (
+            <PlaidLink
+              linkToken={linkToken}
+              onSuccess={handlePlaidSuccess}
+              onExit={handlePlaidExit}
+            />
+          )}
+        </View>
+      </Modal>
+
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        {/* Payment Method Section */}
         <View style={styles.connectionSection}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
 
@@ -200,17 +292,13 @@ export default function Wallet() {
             {!connected && (
               <View style={styles.explainerBox}>
                 <Text style={styles.explainerText}>
-                  Your buy-in is held securely until the challenge ends. The
-                  winner receives the full pool automatically.
+                  Your buy-in is held securely until the challenge ends. The winner receives the
+                  full pool automatically.
                 </Text>
               </View>
             )}
 
             <View style={styles.paymentOptions}>
-              <TouchableOpacity style={styles.paymentOption}>
-                <Building2 color="#374151" size={20} />
-                <Text style={styles.paymentOptionText}>Bank Account</Text>
-              </TouchableOpacity>
               <TouchableOpacity style={styles.paymentOption}>
                 <CreditCard color="#374151" size={20} />
                 <Text style={styles.paymentOptionText}>Debit Card</Text>
@@ -219,6 +307,70 @@ export default function Wallet() {
           </View>
         </View>
 
+        {/* Plaid Bank Connection Section */}
+        <View style={styles.plaidSection}>
+          <Text style={styles.sectionTitle}>Bank Account (Plaid)</Text>
+
+          <View style={styles.plaidCard}>
+            <View style={styles.plaidHeader}>
+              <View style={styles.plaidInfo}>
+                <Building2 color={plaidLinked ? '#10B981' : '#6B7280'} size={24} />
+                <View style={styles.plaidTextGroup}>
+                  <Text style={styles.plaidLabel}>
+                    {plaidLinked ? 'Bank Connected' : 'No Bank Linked'}
+                  </Text>
+                  {institutionName && (
+                    <Text style={styles.institutionName}>{institutionName}</Text>
+                  )}
+                </View>
+              </View>
+              {plaidLinked && <CheckCircle color="#10B981" size={24} />}
+            </View>
+
+            {!plaidLinked && (
+              <View style={styles.plaidExplainerBox}>
+                <Text style={styles.plaidExplainerText}>
+                  Connect your bank account to verify deposits, monitor transactions, and
+                  automatically track challenge compliance.
+                </Text>
+              </View>
+            )}
+
+            {plaidLinked ? (
+              <TouchableOpacity
+                style={styles.syncButton}
+                onPress={handleSyncTransactions}
+                disabled={syncingTransactions}
+              >
+                {syncingTransactions ? (
+                  <ActivityIndicator size="small" color="#10B981" />
+                ) : (
+                  <RefreshCw size={16} color="#10B981" />
+                )}
+                <Text style={styles.syncButtonText}>
+                  {syncingTransactions ? 'Syncing...' : 'Sync Transactions'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.connectButton}
+                onPress={handleConnectBank}
+                disabled={linkTokenLoading}
+              >
+                {linkTokenLoading ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <LinkIcon size={16} color="#ffffff" />
+                )}
+                <Text style={styles.connectButtonText}>
+                  {linkTokenLoading ? 'Preparing...' : 'Connect Bank via Plaid'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Prize Pool Section */}
         {prizePoolStatus && (
           <View style={styles.prizePoolSection}>
             <Text style={styles.sectionTitle}>Current Prize Pool</Text>
@@ -226,23 +378,17 @@ export default function Wallet() {
             <View style={styles.prizePoolCard}>
               <View style={styles.prizePoolHeader}>
                 <WalletIcon color="#10B981" size={32} />
-                <Text style={styles.prizePoolAmount}>
-                  ${prizePoolStatus.total_pool}
-                </Text>
+                <Text style={styles.prizePoolAmount}>${prizePoolStatus.total_pool}</Text>
               </View>
 
               <View style={styles.prizePoolStats}>
                 <View style={styles.prizePoolStat}>
-                  <Text style={styles.prizePoolStatValue}>
-                    {prizePoolStatus.paid_count}
-                  </Text>
+                  <Text style={styles.prizePoolStatValue}>{prizePoolStatus.paid_count}</Text>
                   <Text style={styles.prizePoolStatLabel}>Paid</Text>
                 </View>
                 <View style={styles.divider} />
                 <View style={styles.prizePoolStat}>
-                  <Text style={styles.prizePoolStatValue}>
-                    {prizePoolStatus.pending_count}
-                  </Text>
+                  <Text style={styles.prizePoolStatValue}>{prizePoolStatus.pending_count}</Text>
                   <Text style={styles.prizePoolStatLabel}>Pending</Text>
                 </View>
               </View>
@@ -251,8 +397,8 @@ export default function Wallet() {
                 <View style={styles.nudgeBox}>
                   <Text style={styles.nudgeText}>
                     Waiting on {prizePoolStatus.pending_count} player
-                    {prizePoolStatus.pending_count > 1 ? 's' : ''} to pay their
-                    buy-in before the challenge can begin.
+                    {prizePoolStatus.pending_count > 1 ? 's' : ''} to pay their buy-in before
+                    the challenge can begin.
                   </Text>
                 </View>
               )}
@@ -260,6 +406,7 @@ export default function Wallet() {
           </View>
         )}
 
+        {/* Transaction History Section */}
         <View style={styles.transactionsSection}>
           <Text style={styles.sectionTitle}>Transaction History</Text>
 
@@ -284,9 +431,7 @@ export default function Wallet() {
                         {formatDate(transaction.created_at)}
                       </Text>
                       {transaction.status === 'denied' && transaction.denial_reason && (
-                        <Text style={styles.denialReason}>
-                          {transaction.denial_reason}
-                        </Text>
+                        <Text style={styles.denialReason}>{transaction.denial_reason}</Text>
                       )}
                     </View>
                   </View>
@@ -294,7 +439,8 @@ export default function Wallet() {
                     <Text
                       style={[
                         styles.transactionAmount,
-                        transaction.transaction_type === 'payout' && styles.transactionAmountPositive,
+                        transaction.transaction_type === 'payout' &&
+                          styles.transactionAmountPositive,
                       ]}
                     >
                       {transaction.transaction_type === 'payout' ? '+' : '-'}$
@@ -360,6 +506,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6B7280',
   },
+  // Modal
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalCancel: {
+    fontSize: 16,
+    color: '#10B981',
+    fontWeight: '600',
+    width: 60,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  // Payment Method
   connectionSection: {
     gap: 12,
   },
@@ -422,6 +595,86 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#374151',
   },
+  // Plaid Section
+  plaidSection: {
+    gap: 12,
+  },
+  plaidCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  plaidHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  plaidInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  plaidTextGroup: {
+    gap: 2,
+  },
+  plaidLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  institutionName: {
+    fontSize: 13,
+    color: '#10B981',
+    fontWeight: '500',
+  },
+  plaidExplainerBox: {
+    backgroundColor: '#F0FDF4',
+    padding: 12,
+    borderRadius: 8,
+  },
+  plaidExplainerText: {
+    fontSize: 14,
+    color: '#166534',
+    lineHeight: 20,
+  },
+  connectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#10B981',
+    borderRadius: 12,
+    paddingVertical: 14,
+  },
+  connectButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
+  syncButtonText: {
+    color: '#10B981',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  // Prize Pool
   prizePoolSection: {
     gap: 12,
   },
@@ -482,6 +735,7 @@ const styles = StyleSheet.create({
     color: '#92400E',
     lineHeight: 20,
   },
+  // Transactions
   transactionsSection: {
     gap: 12,
   },
