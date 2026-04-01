@@ -68,6 +68,8 @@ export default function Wallet() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [linkTokenLoading, setLinkTokenLoading] = useState(false);
   const [syncingTransactions, setSyncingTransactions] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [plaidError, setPlaidError] = useState<string | null>(null);
 
   const fetchWalletData = useCallback(async () => {
     if (!user) return;
@@ -131,6 +133,7 @@ export default function Wallet() {
       const linkedAccount = await plaidApi.getLinkedAccount();
       setPlaidLinked(!!linkedAccount);
       setInstitutionName(linkedAccount?.institution_name ?? null);
+      setLastSyncedAt(linkedAccount?.last_synced_at ?? null);
     } catch (error) {
       console.error('Error fetching wallet data:', error);
     } finally {
@@ -150,12 +153,17 @@ export default function Wallet() {
 
   const handleConnectBank = async () => {
     setLinkTokenLoading(true);
+    setPlaidError(null);
     try {
       const token = await plaidApi.createLinkToken();
+      if (!token) {
+        setPlaidError('No link token returned from server. Check edge function logs.');
+        return;
+      }
       setLinkToken(token);
       setShowPlaidLink(true);
     } catch (error: any) {
-      Alert.alert('Connection Error', error.message || 'Failed to start bank connection.');
+      setPlaidError(error.message || 'Failed to start bank connection.');
     } finally {
       setLinkTokenLoading(false);
     }
@@ -166,8 +174,9 @@ export default function Wallet() {
     setLinkToken(null);
     try {
       await plaidApi.exchangeToken(publicToken, metadata);
-      // Sync transactions immediately after linking
-      await plaidApi.syncTransactions();
+      // Force an immediate sync after linking — bypasses the 1-hour cooldown
+      const result = await plaidApi.syncTransactions(true);
+      setLastSyncedAt(result.last_synced_at);
       const linkedAccount = await plaidApi.getLinkedAccount();
       setPlaidLinked(true);
       setInstitutionName(linkedAccount?.institution_name ?? null);
@@ -185,10 +194,19 @@ export default function Wallet() {
   const handleSyncTransactions = async () => {
     setSyncingTransactions(true);
     try {
-      const count = await plaidApi.syncTransactions();
-      Alert.alert('Synced', `${count} transaction${count !== 1 ? 's' : ''} synced from your bank.`);
+      const result = await plaidApi.syncTransactions();
+      setLastSyncedAt(result.last_synced_at);
+      Alert.alert('Synced', `${result.synced} transaction${result.synced !== 1 ? 's' : ''} synced from your bank.`);
     } catch (error: any) {
-      Alert.alert('Sync Error', error.message || 'Failed to sync transactions.');
+      if (error.rateLimited) {
+        Alert.alert(
+          'Already Up to Date',
+          error.message || `Next sync available in ${error.retryAfterMinutes} minutes.`
+        );
+        if (error.lastSyncedAt) setLastSyncedAt(error.lastSyncedAt);
+      } else {
+        Alert.alert('Sync Error', error.message || 'Failed to sync transactions.');
+      }
     } finally {
       setSyncingTransactions(false);
     }
@@ -225,6 +243,21 @@ export default function Wallet() {
     } finally {
       setPayingIn(false);
     }
+  };
+
+  const SYNC_COOLDOWN_MS = 60 * 60 * 1000;
+  const msSinceSync = lastSyncedAt ? Date.now() - new Date(lastSyncedAt).getTime() : null;
+  const syncOnCooldown = msSinceSync !== null && msSinceSync < SYNC_COOLDOWN_MS;
+  const minutesUntilSync = syncOnCooldown
+    ? Math.ceil((SYNC_COOLDOWN_MS - msSinceSync!) / 60000)
+    : 0;
+
+  const formatLastSynced = (iso: string) => {
+    const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ago`;
   };
 
   const hoursUntil = (iso: string | null) => {
@@ -429,21 +462,38 @@ export default function Wallet() {
               </View>
             )}
 
+            {plaidError && (
+              <View style={styles.plaidErrorBox}>
+                <Text style={styles.plaidErrorText}>{plaidError}</Text>
+              </View>
+            )}
+
             {plaidLinked ? (
-              <TouchableOpacity
-                style={styles.syncButton}
-                onPress={handleSyncTransactions}
-                disabled={syncingTransactions}
-              >
-                {syncingTransactions ? (
-                  <ActivityIndicator size="small" color="#10B981" />
-                ) : (
-                  <RefreshCw size={16} color="#10B981" />
+              <>
+                {lastSyncedAt && (
+                  <Text style={styles.lastSyncedText}>
+                    Last synced {formatLastSynced(lastSyncedAt)}
+                  </Text>
                 )}
-                <Text style={styles.syncButtonText}>
-                  {syncingTransactions ? 'Syncing...' : 'Sync Transactions'}
-                </Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.syncButton, syncOnCooldown && styles.syncButtonDisabled]}
+                  onPress={handleSyncTransactions}
+                  disabled={syncingTransactions || syncOnCooldown}
+                >
+                  {syncingTransactions ? (
+                    <ActivityIndicator size="small" color="#10B981" />
+                  ) : (
+                    <RefreshCw size={16} color={syncOnCooldown ? '#9CA3AF' : '#10B981'} />
+                  )}
+                  <Text style={[styles.syncButtonText, syncOnCooldown && styles.syncButtonTextDisabled]}>
+                    {syncingTransactions
+                      ? 'Syncing...'
+                      : syncOnCooldown
+                        ? `Available in ${minutesUntilSync}m`
+                        : 'Sync Transactions'}
+                  </Text>
+                </TouchableOpacity>
+              </>
             ) : (
               <TouchableOpacity
                 style={styles.connectButton}
@@ -790,6 +840,16 @@ const styles = StyleSheet.create({
     color: '#166534',
     lineHeight: 20,
   },
+  plaidErrorBox: {
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 8,
+  },
+  plaidErrorText: {
+    fontSize: 13,
+    color: '#DC2626',
+    lineHeight: 18,
+  },
   connectButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -819,6 +879,19 @@ const styles = StyleSheet.create({
     color: '#10B981',
     fontSize: 15,
     fontWeight: '600',
+  },
+  syncButtonDisabled: {
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  syncButtonTextDisabled: {
+    color: '#9CA3AF',
+  },
+  lastSyncedText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    marginBottom: -4,
   },
   // Prize Pool
   prizePoolSection: {

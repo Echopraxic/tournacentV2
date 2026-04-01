@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -12,16 +12,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { PRESET_CHALLENGES, PresetChallenge } from '@/lib/presets';
 import { ChevronRight, Clock, DollarSign, Users, Share2 } from 'lucide-react-native';
-
-interface Challenge {
-  id: string;
-  name: string;
-  duration_days: number;
-  buy_in_amount: number;
-  prize_pool: number;
-  status: string;
-}
 
 type ModalStep = 'choose_type' | 'group_info' | 'group_sharing';
 
@@ -32,60 +24,35 @@ const INVITE_BASE_URL = 'https://tournacent.app/join';
 export default function ChallengesScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const [templates, setTemplates] = useState<Challenge[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedTemplate, setSelectedTemplate] = useState<Challenge | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState<PresetChallenge | null>(null);
   const [step, setStep] = useState<ModalStep | null>(null);
   const [joining, setJoining] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
+  const [joinError, setJoinError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (user) loadTemplates();
-  }, [user]);
-
-  const loadTemplates = async () => {
-    try {
-      const { data } = await supabase
-        .from('challenges')
-        .select('*')
-        .eq('is_template', true)
-        .order('created_at', { ascending: false });
-      setTemplates(data || []);
-    } catch (error) {
-      console.error('Error loading templates:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const copyTasksFromTemplate = async (templateId: string, newChallengeId: string) => {
-    const { data: tasks } = await supabase
-      .from('tasks')
-      .select('title, description, points, is_mandatory, task_type')
-      .eq('challenge_id', templateId);
-    if (tasks?.length) {
-      await supabase.from('tasks').insert(
-        tasks.map((t) => ({ ...t, challenge_id: newChallengeId }))
-      );
-    }
+  const insertTasksFromPreset = async (preset: PresetChallenge, challengeId: string) => {
+    await supabase.from('tasks').insert(
+      preset.tasks.map((t) => ({ ...t, challenge_id: challengeId }))
+    );
   };
 
   const handleJoinSolo = async () => {
-    if (!selectedTemplate || !user) return;
+    if (!selectedPreset || !user) return;
     setJoining(true);
+    setJoinError(null);
     try {
       const now = new Date();
       const endDate = new Date(
-        now.getTime() + selectedTemplate.duration_days * 24 * 60 * 60 * 1000
+        now.getTime() + selectedPreset.duration_days * 24 * 60 * 60 * 1000
       );
 
       const { data: newChallenge, error } = await supabase
         .from('challenges')
         .insert({
-          name: selectedTemplate.name,
+          name: selectedPreset.name,
           organizer_id: user.id,
-          buy_in_amount: selectedTemplate.buy_in_amount,
-          duration_days: selectedTemplate.duration_days,
+          buy_in_amount: selectedPreset.buy_in_amount,
+          duration_days: selectedPreset.duration_days,
           start_date: now.toISOString(),
           end_date: endDate.toISOString(),
           status: 'active',
@@ -99,7 +66,7 @@ export default function ChallengesScreen() {
       if (error) throw error;
 
       await Promise.all([
-        copyTasksFromTemplate(selectedTemplate.id, newChallenge.id),
+        insertTasksFromPreset(selectedPreset, newChallenge.id),
         supabase.from('challenge_participants').insert({
           challenge_id: newChallenge.id,
           user_id: user.id,
@@ -109,16 +76,17 @@ export default function ChallengesScreen() {
 
       closeModal();
       router.replace('/(tabs)');
-    } catch (error) {
-      console.error('Error joining solo challenge:', error);
+    } catch (error: any) {
+      setJoinError(error?.message ?? 'Something went wrong. Please try again.');
     } finally {
       setJoining(false);
     }
   };
 
   const handleCreateGroup = async () => {
-    if (!selectedTemplate || !user) return;
+    if (!selectedPreset || !user) return;
     setJoining(true);
+    setJoinError(null);
     try {
       const { data: code, error: codeError } = await supabase.rpc('generate_invite_code');
       if (codeError) throw codeError;
@@ -128,10 +96,10 @@ export default function ChallengesScreen() {
       const { data: newChallenge, error } = await supabase
         .from('challenges')
         .insert({
-          name: selectedTemplate.name,
+          name: selectedPreset.name,
           organizer_id: user.id,
-          buy_in_amount: selectedTemplate.buy_in_amount,
-          duration_days: selectedTemplate.duration_days,
+          buy_in_amount: selectedPreset.buy_in_amount,
+          duration_days: selectedPreset.duration_days,
           status: 'pending',
           challenge_type: 'group',
           invite_code: code,
@@ -145,7 +113,7 @@ export default function ChallengesScreen() {
       if (error) throw error;
 
       await Promise.all([
-        copyTasksFromTemplate(selectedTemplate.id, newChallenge.id),
+        insertTasksFromPreset(selectedPreset, newChallenge.id),
         supabase.from('challenge_participants').insert({
           challenge_id: newChallenge.id,
           user_id: user.id,
@@ -155,21 +123,21 @@ export default function ChallengesScreen() {
 
       setInviteCode(code);
       setStep('group_sharing');
-    } catch (error) {
-      console.error('Error creating group challenge:', error);
+    } catch (error: any) {
+      setJoinError(error?.message ?? 'Something went wrong. Please try again.');
     } finally {
       setJoining(false);
     }
   };
 
   const handleShare = async () => {
-    if (!selectedTemplate || !inviteCode) return;
+    if (!selectedPreset || !inviteCode) return;
     const inviteUrl = `${INVITE_BASE_URL}/${inviteCode}`;
     const storeLink = Platform.OS === 'ios' ? APP_STORE_URL : PLAY_STORE_URL;
     const message = [
       `I'm challenging you on Tournacent! 🏆`,
       ``,
-      `Join my "${selectedTemplate.name}" challenge and compete for the prize pool.`,
+      `Join my "${selectedPreset.name}" challenge and compete for the prize pool.`,
       ``,
       `Your invite code: ${inviteCode}`,
       ``,
@@ -190,18 +158,11 @@ export default function ChallengesScreen() {
   };
 
   const closeModal = () => {
-    setSelectedTemplate(null);
+    setSelectedPreset(null);
     setStep(null);
     setInviteCode('');
+    setJoinError(null);
   };
-
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#10B981" />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
@@ -214,47 +175,41 @@ export default function ChallengesScreen() {
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-        {templates.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No challenges available</Text>
-          </View>
-        ) : (
-          templates.map((template) => (
-            <TouchableOpacity
-              key={template.id}
-              style={styles.challengeCard}
-              onPress={() => {
-                setSelectedTemplate(template);
-                setStep('choose_type');
-              }}
-            >
-              <View style={styles.cardHeader}>
-                <Text style={styles.challengeName}>{template.name}</Text>
-                <ChevronRight color="#D1D5DB" size={24} />
+        {PRESET_CHALLENGES.map((preset) => (
+          <TouchableOpacity
+            key={preset.id}
+            style={styles.challengeCard}
+            onPress={() => {
+              setSelectedPreset(preset);
+              setStep('choose_type');
+            }}
+          >
+            <View style={styles.cardHeader}>
+              <Text style={styles.challengeName}>{preset.name}</Text>
+              <ChevronRight color="#D1D5DB" size={24} />
+            </View>
+            <View style={styles.detailsRow}>
+              <View style={styles.detailItem}>
+                <Clock size={16} color="#6B7280" />
+                <Text style={styles.detailText}>{preset.duration_days} days</Text>
               </View>
-              <View style={styles.detailsRow}>
-                <View style={styles.detailItem}>
-                  <Clock size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>{template.duration_days} days</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <DollarSign size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>
-                    ${Number(template.buy_in_amount).toFixed(2)} buy-in
-                  </Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Users size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>Solo or Group</Text>
-                </View>
+              <View style={styles.detailItem}>
+                <DollarSign size={16} color="#6B7280" />
+                <Text style={styles.detailText}>
+                  ${preset.buy_in_amount.toFixed(2)} buy-in
+                </Text>
               </View>
-            </TouchableOpacity>
-          ))
-        )}
+              <View style={styles.detailItem}>
+                <Users size={16} color="#6B7280" />
+                <Text style={styles.detailText}>Solo or Group</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        ))}
       </ScrollView>
 
       {/* ── Bottom-sheet modal ── */}
-      {selectedTemplate && step && (
+      {selectedPreset && step && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.overlayBackdrop} onPress={closeModal} />
           <View style={styles.sheet}>
@@ -262,7 +217,7 @@ export default function ChallengesScreen() {
             {/* Step 1 — Choose type */}
             {step === 'choose_type' && (
               <>
-                <Text style={styles.sheetTitle}>{selectedTemplate.name}</Text>
+                <Text style={styles.sheetTitle}>{selectedPreset.name}</Text>
                 <Text style={styles.sheetSubtitle}>How do you want to play?</Text>
 
                 <TouchableOpacity
@@ -288,6 +243,7 @@ export default function ChallengesScreen() {
                 </TouchableOpacity>
 
                 {joining && <ActivityIndicator color="#10B981" style={{ marginTop: 8 }} />}
+                {joinError && <Text style={styles.errorText}>{joinError}</Text>}
 
                 <TouchableOpacity onPress={closeModal} style={styles.cancelLink}>
                   <Text style={styles.cancelLinkText}>Cancel</Text>
@@ -304,7 +260,7 @@ export default function ChallengesScreen() {
                   {[
                     ['👥', 'Requires at least 3 players to activate'],
                     ['⏰', 'Friends have 48 hours to join using your invite code — then the challenge auto-cancels if fewer than 3 joined'],
-                    ['💸', `Buy-in ($${Number(selectedTemplate.buy_in_amount).toFixed(2)}) is only collected when the challenge activates`],
+                    ['💸', `Buy-in ($${selectedPreset.buy_in_amount.toFixed(2)}) is only collected when the challenge activates`],
                     ['🕒', 'Once active, players have 48 hours to complete their buy-in or they are removed'],
                     ['🏆', 'Additional players can join for the first 48 hours after activation'],
                   ].map(([icon, text], i) => (
@@ -324,6 +280,8 @@ export default function ChallengesScreen() {
                     {joining ? 'Creating challenge…' : 'Create & Get Invite Code'}
                   </Text>
                 </TouchableOpacity>
+
+                {joinError && <Text style={styles.errorText}>{joinError}</Text>}
 
                 <TouchableOpacity onPress={() => setStep('choose_type')} style={styles.cancelLink}>
                   <Text style={styles.cancelLinkText}>Back</Text>
@@ -368,7 +326,6 @@ export default function ChallengesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     backgroundColor: '#FFFFFF',
     paddingTop: 60,
@@ -384,8 +341,6 @@ const styles = StyleSheet.create({
   backButton: { fontSize: 16, color: '#10B981', fontWeight: '600', paddingHorizontal: 8 },
   scrollView: { flex: 1 },
   content: { padding: 16, gap: 12, paddingBottom: 32 },
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 64 },
-  emptyText: { fontSize: 16, color: '#6B7280' },
   challengeCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -465,4 +420,5 @@ const styles = StyleSheet.create({
 
   cancelLink: { alignItems: 'center', paddingVertical: 4 },
   cancelLinkText: { fontSize: 14, color: '#6B7280' },
+  errorText: { fontSize: 13, color: '#EF4444', textAlign: 'center', paddingHorizontal: 8 },
 });

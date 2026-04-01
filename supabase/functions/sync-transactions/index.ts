@@ -17,6 +17,9 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// How long to wait before allowing another manual sync (milliseconds)
+const MANUAL_SYNC_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS_HEADERS });
@@ -28,6 +31,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
+    // Authenticate the calling user
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -47,10 +51,13 @@ serve(async (req) => {
       });
     }
 
-    // Fetch user's Plaid access token
+    // Enforce 1-hour cooldown on manual syncs (pass force=true to bypass, e.g. post-link)
+    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+    const force = body.force === true;
+
     const { data: plaidItem, error: itemError } = await supabase
       .from('plaid_items')
-      .select('access_token')
+      .select('access_token, cursor, last_synced_at')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -61,57 +68,88 @@ serve(async (req) => {
       });
     }
 
-    // Fetch transactions from the last 90 days
-    const endDate = new Date().toISOString().split('T')[0];
-    const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split('T')[0];
-
-    const txResponse = await fetch(`${PLAID_BASE_URL}/transactions/get`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id: PLAID_CLIENT_ID,
-        secret: PLAID_SECRET,
-        access_token: plaidItem.access_token,
-        start_date: startDate,
-        end_date: endDate,
-        options: { count: 500, include_personal_finance_category: true },
-      }),
-    });
-
-    const txData = await txResponse.json();
-
-    if (!txResponse.ok) {
-      throw new Error(txData.error_message || 'Failed to fetch transactions');
-    }
-
-    const transactions: any[] = txData.transactions ?? [];
-
-    if (transactions.length > 0) {
-      const rows = transactions.map((tx: any) => ({
-        user_id: user.id,
-        plaid_transaction_id: tx.transaction_id,
-        account_id: tx.account_id,
-        // Plaid: positive = debit (money leaving), negative = credit (money entering)
-        amount: tx.amount,
-        date: tx.date,
-        name: tx.name,
-        category: tx.category ?? [],
-        pending: tx.pending ?? false,
-      }));
-
-      const { error: upsertError } = await supabase
-        .from('bank_transactions')
-        .upsert(rows, { onConflict: 'plaid_transaction_id' });
-
-      if (upsertError) {
-        throw new Error(upsertError.message);
+    if (!force && plaidItem.last_synced_at) {
+      const msSinceLast = Date.now() - new Date(plaidItem.last_synced_at).getTime();
+      if (msSinceLast < MANUAL_SYNC_COOLDOWN_MS) {
+        const minutesLeft = Math.ceil((MANUAL_SYNC_COOLDOWN_MS - msSinceLast) / 60000);
+        return new Response(
+          JSON.stringify({
+            error: 'rate_limited',
+            message: `Sync available again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.`,
+            last_synced_at: plaidItem.last_synced_at,
+            retry_after_minutes: minutesLeft,
+          }),
+          { status: 429, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
+        );
       }
     }
 
+    // Only sync if the user is in an active challenge
+    const { data: activeParticipant } = await supabase
+      .from('challenge_participants')
+      .select('challenge_id, challenges!inner(status)')
+      .eq('user_id', user.id)
+      .eq('challenges.status', 'active')
+      .maybeSingle();
+
+    if (!activeParticipant && !force) {
+      return new Response(
+        JSON.stringify({ success: true, synced: 0, skipped: 'no_active_challenge' }),
+        { headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
+      );
+    }
+
+    // Incremental sync using /transactions/sync with stored cursor
+    const { added, modified, removed, nextCursor } = await syncIncremental(
+      plaidItem.access_token,
+      plaidItem.cursor ?? null
+    );
+
+    const now = new Date().toISOString();
+
+    // Upsert added and modified transactions
+    if (added.length + modified.length > 0) {
+      const rows = [...added, ...modified].map((tx: any) => ({
+        user_id: user.id,
+        plaid_transaction_id: tx.transaction_id,
+        account_id: tx.account_id,
+        amount: tx.amount,
+        date: tx.date,
+        name: tx.name,
+        category: tx.personal_finance_category
+          ? [tx.personal_finance_category.primary]
+          : (tx.category ?? []),
+        pending: tx.pending ?? false,
+      }));
+
+      await supabase
+        .from('bank_transactions')
+        .upsert(rows, { onConflict: 'plaid_transaction_id' });
+    }
+
+    // Remove transactions Plaid has deleted or reversed
+    if (removed.length > 0) {
+      const removedIds = removed.map((tx: any) => tx.transaction_id);
+      await supabase
+        .from('bank_transactions')
+        .delete()
+        .in('plaid_transaction_id', removedIds)
+        .eq('user_id', user.id);
+    }
+
+    // Persist cursor and last_synced_at
+    await supabase
+      .from('plaid_items')
+      .update({ cursor: nextCursor, last_synced_at: now })
+      .eq('user_id', user.id);
+
     return new Response(
-      JSON.stringify({ success: true, synced: transactions.length }),
+      JSON.stringify({
+        success: true,
+        synced: added.length + modified.length,
+        removed: removed.length,
+        last_synced_at: now,
+      }),
       { headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
     );
   } catch (error: any) {
@@ -121,3 +159,42 @@ serve(async (req) => {
     });
   }
 });
+
+/**
+ * Calls /transactions/sync in a loop until has_more is false.
+ * Returns the combined added, modified, removed arrays and the final cursor.
+ */
+async function syncIncremental(accessToken: string, cursor: string | null) {
+  const added: any[] = [];
+  const modified: any[] = [];
+  const removed: any[] = [];
+  let nextCursor = cursor;
+
+  do {
+    const body: Record<string, any> = {
+      client_id: PLAID_CLIENT_ID,
+      secret: PLAID_SECRET,
+      access_token: accessToken,
+      options: { include_personal_finance_category: true },
+    };
+    if (nextCursor) body.cursor = nextCursor;
+
+    const res = await fetch(`${PLAID_BASE_URL}/transactions/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error_message || 'Plaid /transactions/sync failed');
+
+    added.push(...(data.added ?? []));
+    modified.push(...(data.modified ?? []));
+    removed.push(...(data.removed ?? []));
+    nextCursor = data.next_cursor;
+
+    if (!data.has_more) break;
+  } while (true);
+
+  return { added, modified, removed, nextCursor };
+}

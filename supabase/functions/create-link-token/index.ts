@@ -47,24 +47,34 @@ serve(async (req) => {
       });
     }
 
+    // Accept optional redirect_uri from web clients for OAuth bank support
+    const requestBody = req.method === 'POST'
+      ? await req.json().catch(() => ({}))
+      : {};
+    const redirectUri: string | undefined = requestBody.redirect_uri;
+
+    const plaidBody: Record<string, any> = {
+      client_id: PLAID_CLIENT_ID,
+      secret: PLAID_SECRET,
+      client_name: 'Tournacent',
+      country_codes: ['US'],
+      language: 'en',
+      user: { client_user_id: user.id },
+      products: ['transactions'],
+    };
+    if (redirectUri) plaidBody.redirect_uri = redirectUri;
+
     const response = await fetch(`${PLAID_BASE_URL}/link/token/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id: PLAID_CLIENT_ID,
-        secret: PLAID_SECRET,
-        client_name: 'Tournacent',
-        country_codes: ['US'],
-        language: 'en',
-        user: { client_user_id: user.id },
-        products: ['transactions'],
-      }),
+      body: JSON.stringify(plaidBody),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error_message || 'Failed to create link token');
+      const detail = data.error_message || data.display_message || data.error_code || JSON.stringify(data);
+      throw new Error(`Plaid error: ${detail}`);
     }
 
     return new Response(JSON.stringify({ link_token: data.link_token }), {

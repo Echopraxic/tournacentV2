@@ -94,7 +94,7 @@ const verifySavingsTask = async (
     .select('amount, date, name')
     .eq('user_id', userId)
     .gte('date', challengeStart)
-    .gt('amount', 0) // positive = debit/withdrawal in Plaid
+    .gt('amount', 15) // positive = debit/withdrawal in Plaid; only flag debits > $15
     .eq('pending', false);
 
   if (withdrawals && withdrawals.length > 0) {
@@ -350,7 +350,7 @@ export const monitorForWithdrawals = async (
     .select('id')
     .eq('user_id', userId)
     .gte('date', challengeStartDate)
-    .gt('amount', 0) // positive = debit/withdrawal in Plaid
+    .gt('amount', 15) // positive = debit/withdrawal in Plaid; only flag debits > $15
     .eq('pending', false)
     .limit(1);
 

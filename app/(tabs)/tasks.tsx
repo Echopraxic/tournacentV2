@@ -7,10 +7,13 @@ import {
   TouchableOpacity,
   RefreshControl,
   Modal,
+  Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { CheckCircle2, Circle, AlertTriangle } from 'lucide-react-native';
+import { verifyTaskCompletion } from '@/lib/task-verification';
+import { CheckCircle2, Circle, AlertTriangle, Upload, ImageIcon } from 'lucide-react-native';
 
 interface Task {
   id: string;
@@ -34,6 +37,8 @@ export default function Tasks() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
+  const [evidenceUri, setEvidenceUri] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const fetchTasks = async () => {
     if (!user) return;
@@ -97,18 +102,74 @@ export default function Tasks() {
   const handleTaskPress = (task: Task) => {
     if (!task.completed) {
       setSelectedTask(task);
+      setEvidenceUri(null);
       setModalVisible(true);
     }
   };
 
+  const handlePickEvidence = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      setFeedback({ message: 'Photo library access is required to upload evidence.', isError: true });
+      setTimeout(() => setFeedback(null), 3000);
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setEvidenceUri(result.assets[0].uri);
+    }
+  };
+
+  const uploadEvidence = async (taskId: string): Promise<string | null> => {
+    if (!evidenceUri || !user) return null;
+    const response = await fetch(evidenceUri);
+    const blob = await response.blob();
+    const path = `${user.id}/${taskId}`;
+    const { error } = await supabase.storage
+      .from('task-evidence')
+      .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+    if (error) throw error;
+    return path;
+  };
+
   const handleCompleteTask = async () => {
     if (!selectedTask || !challengeId || !user) return;
+    setUploading(true);
 
     try {
+      // Run Plaid-backed verification for savings, no-spend, and tracking tasks
+      const plaidVerifiedTypes = ['savings', 'no_spend', 'tracking'];
+      if (plaidVerifiedTypes.includes(selectedTask.task_type)) {
+        const verification = await verifyTaskCompletion(
+          user.id,
+          selectedTask.id,
+          challengeId,
+          selectedTask.task_type,
+          selectedTask.is_mandatory
+        );
+        if (!verification.success) {
+          setUploading(false);
+          setModalVisible(false);
+          setFeedback({ message: verification.message, isError: true });
+          setTimeout(() => setFeedback(null), 5000);
+          return;
+        }
+      }
+
+      let evidenceStoragePath: string | null = null;
+      if (selectedTask.task_type === 'subscription') {
+        evidenceStoragePath = await uploadEvidence(selectedTask.id);
+      }
+
       await supabase.from('task_completions').insert({
         task_id: selectedTask.id,
         user_id: user.id,
         challenge_id: challengeId,
+        ...(evidenceStoragePath ? { evidence_url: evidenceStoragePath } : {}),
       });
 
       await supabase
@@ -119,12 +180,15 @@ export default function Tasks() {
 
       setModalVisible(false);
       setSelectedTask(null);
+      setEvidenceUri(null);
       setFeedback({ message: `Task completed! +${selectedTask.points} points`, isError: false });
       setTimeout(() => setFeedback(null), 3000);
       fetchTasks();
     } catch (error: any) {
       setFeedback({ message: error.message || 'Failed to complete task', isError: true });
       setTimeout(() => setFeedback(null), 3000);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -295,24 +359,71 @@ export default function Tasks() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Complete Task?</Text>
-            <Text style={styles.modalDescription}>
-              This will add {selectedTask?.points} points to your score.
-            </Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalButtonCancel}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButtonConfirm}
-                onPress={handleCompleteTask}
-              >
-                <Text style={styles.modalButtonConfirmText}>Complete</Text>
-              </TouchableOpacity>
-            </View>
+            {selectedTask?.task_type === 'subscription' ? (
+              <>
+                <Text style={styles.modalTitle}>Upload Cancellation Proof</Text>
+                <Text style={styles.modalDescription}>
+                  Upload a screenshot of your cancellation confirmation email to verify this task.
+                </Text>
+
+                <TouchableOpacity style={styles.uploadArea} onPress={handlePickEvidence}>
+                  {evidenceUri ? (
+                    <Image source={{ uri: evidenceUri }} style={styles.evidencePreview} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.uploadPlaceholder}>
+                      <ImageIcon size={32} color="#9CA3AF" />
+                      <Text style={styles.uploadPlaceholderText}>Tap to choose a screenshot</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {evidenceUri && (
+                  <TouchableOpacity onPress={handlePickEvidence}>
+                    <Text style={styles.changePhotoText}>Change photo</Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.modalButtonCancel}
+                    onPress={() => { setModalVisible(false); setEvidenceUri(null); }}
+                  >
+                    <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButtonConfirm, (!evidenceUri || uploading) && styles.modalButtonDisabled]}
+                    onPress={handleCompleteTask}
+                    disabled={!evidenceUri || uploading}
+                  >
+                    <Upload size={16} color="#FFFFFF" />
+                    <Text style={styles.modalButtonConfirmText}>
+                      {uploading ? 'Uploading…' : `Submit (+${selectedTask?.points} pts)`}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>Complete Task?</Text>
+                <Text style={styles.modalDescription}>
+                  This will add {selectedTask?.points} points to your score.
+                </Text>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.modalButtonCancel}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalButtonConfirm}
+                    onPress={handleCompleteTask}
+                  >
+                    <Text style={styles.modalButtonConfirmText}>Complete</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -555,10 +666,45 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#10B981',
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
   },
   modalButtonConfirmText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  modalButtonDisabled: {
+    opacity: 0.4,
+  },
+  uploadArea: {
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    overflow: 'hidden',
+    height: 180,
+  },
+  uploadPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#F9FAFB',
+  },
+  uploadPlaceholderText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  evidencePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  changePhotoText: {
+    fontSize: 13,
+    color: '#10B981',
+    textAlign: 'center',
+    marginTop: -4,
   },
 });

@@ -19,6 +19,13 @@ export interface PlaidMetadata {
 
 export interface LinkedAccount {
   institution_name: string | null;
+  last_synced_at: string | null;
+}
+
+export interface SyncResult {
+  synced: number;
+  removed: number;
+  last_synced_at: string;
 }
 
 export const plaidApi = {
@@ -28,15 +35,24 @@ export const plaidApi = {
    */
   async createLinkToken(): Promise<string> {
     const token = await getAuthToken();
+
+    // On web, send redirect_uri so Plaid can support OAuth banks.
+    // The URI must be registered in your Plaid dashboard before going to production.
+    const body: Record<string, string> = {};
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      body.redirect_uri = `${window.location.origin}/plaid-oauth`;
+    }
+
     const response = await fetch(`${SUPABASE_URL}/functions/v1/create-link-token`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Failed to create link token');
+    if (!response.ok) throw new Error(data.error || data.message || `HTTP ${response.status}: Failed to create link token`);
     return data.link_token;
   },
 
@@ -59,15 +75,14 @@ export const plaidApi = {
       }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Failed to exchange token');
+    if (!response.ok) throw new Error(data.error || data.message || `HTTP ${response.status}: Failed to exchange token`);
   },
 
   /**
-   * Syncs bank transactions from Plaid into the bank_transactions table.
-   * Fetches the last 90 days of transactions.
-   * Returns the number of transactions synced.
+   * Syncs bank transactions incrementally using the stored cursor.
+   * Passes force=true to bypass the 1-hour cooldown (used immediately after linking).
    */
-  async syncTransactions(): Promise<number> {
+  async syncTransactions(force = false): Promise<SyncResult> {
     const token = await getAuthToken();
     const response = await fetch(`${SUPABASE_URL}/functions/v1/sync-transactions`, {
       method: 'POST',
@@ -75,10 +90,22 @@ export const plaidApi = {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ force }),
     });
     const data = await response.json();
+    if (response.status === 429) {
+      throw Object.assign(new Error(data.message || 'Rate limited'), {
+        rateLimited: true,
+        retryAfterMinutes: data.retry_after_minutes ?? null,
+        lastSyncedAt: data.last_synced_at ?? null,
+      });
+    }
     if (!response.ok) throw new Error(data.error || 'Failed to sync transactions');
-    return data.synced ?? 0;
+    return {
+      synced: data.synced ?? 0,
+      removed: data.removed ?? 0,
+      last_synced_at: data.last_synced_at,
+    };
   },
 
   /**
@@ -93,12 +120,12 @@ export const plaidApi = {
   },
 
   /**
-   * Returns the linked institution info for the current user.
+   * Returns the linked institution info and last sync time for the current user.
    */
   async getLinkedAccount(): Promise<LinkedAccount | null> {
     const { data } = await supabase
       .from('plaid_items')
-      .select('institution_name')
+      .select('institution_name, last_synced_at')
       .maybeSingle();
     return data ?? null;
   },
