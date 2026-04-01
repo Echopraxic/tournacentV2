@@ -15,6 +15,9 @@ const PLAID_BASE_URL = PLAID_BASE_URLS[PLAID_ENV] ?? 'https://sandbox.plaid.com'
 // Ignore webhook-triggered syncs if one ran within this window
 const DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
 
+// Minimum debit amount to trigger savings disqualification (matches task-verification.ts)
+const SAVINGS_WITHDRAWAL_THRESHOLD = 15;
+
 // Webhook codes that mean new transaction data is available
 const TRANSACTION_WEBHOOK_CODES = new Set([
   'SYNC_UPDATES_AVAILABLE',
@@ -24,7 +27,6 @@ const TRANSACTION_WEBHOOK_CODES = new Set([
 ]);
 
 serve(async (req) => {
-  // Plaid only POSTs webhooks
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
@@ -36,7 +38,6 @@ serve(async (req) => {
     return new Response('Bad Request', { status: 400 });
   }
 
-  // Only handle transaction webhooks
   if (body.webhook_type !== 'TRANSACTIONS') {
     return new Response('ok', { status: 200 });
   }
@@ -53,7 +54,6 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // Look up the item — confirms the item_id belongs to a known user
   const { data: plaidItem } = await supabase
     .from('plaid_items')
     .select('user_id, access_token, cursor, last_synced_at')
@@ -61,7 +61,6 @@ serve(async (req) => {
     .maybeSingle();
 
   if (!plaidItem) {
-    // Unknown item — could be a spoofed request, silently ignore
     return new Response('ok', { status: 200 });
   }
 
@@ -124,6 +123,10 @@ serve(async (req) => {
       .update({ cursor: nextCursor, last_synced_at: new Date().toISOString() })
       .eq('item_id', itemId);
 
+    // Check for disqualification on new (non-pending) debits
+    if (added.length > 0) {
+      await checkDisqualification(supabase, plaidItem.user_id, added);
+    }
   } catch (err: any) {
     // Log but return 200 so Plaid doesn't keep retrying for non-transient errors
     console.error('plaid-webhook sync error:', err.message);
@@ -131,6 +134,153 @@ serve(async (req) => {
 
   return new Response('ok', { status: 200 });
 });
+
+/**
+ * Checks whether any newly added transactions should immediately disqualify the user.
+ *
+ * Two violation types are detected:
+ *
+ * 1. Savings withdrawal — any debit > $15 in an active challenge that contains savings tasks.
+ *    Covers the Emergency Fund Sprint rules where withdrawing from the savings account
+ *    is a disqualifying event.
+ *
+ * 2. No-spend category violation — any debit in a category the user declared they'd avoid.
+ *    Covers the No-Spend Reset Challenge. Requires the user to have already completed
+ *    the "Declare 3 Spending Categories" task; if not declared yet, no check is run.
+ *
+ * Disqualification deletes the relevant task completions, recalculates points,
+ * and sets is_disqualified = true on the participant record.
+ */
+async function checkDisqualification(
+  supabase: any,
+  userId: string,
+  addedTransactions: any[]
+): Promise<void> {
+  // Only check non-disqualified, active, non-dropped-out participants
+  const { data: participation } = await supabase
+    .from('challenge_participants')
+    .select('challenge_id, challenges!inner(start_date, status)')
+    .eq('user_id', userId)
+    .eq('is_disqualified', false)
+    .is('dropped_out_at', null)
+    .eq('challenges.status', 'active')
+    .maybeSingle();
+
+  if (!participation) return;
+
+  const challengeId = participation.challenge_id;
+  const challengeStart: string = (participation.challenges as any).start_date;
+
+  // Only consider settled debits on or after the challenge start date
+  const newDebits = addedTransactions.filter(
+    (tx: any) =>
+      !tx.pending &&
+      tx.amount > 0 &&
+      tx.date >= challengeStart.split('T')[0]
+  );
+
+  if (newDebits.length === 0) return;
+
+  // ── Savings violation ─────────────────────────────────────────────────────
+  const { count: savingsTaskCount } = await supabase
+    .from('tasks')
+    .select('id', { count: 'exact', head: true })
+    .eq('challenge_id', challengeId)
+    .eq('task_type', 'savings');
+
+  if ((savingsTaskCount ?? 0) > 0) {
+    const hasLargeWithdrawal = newDebits.some(
+      (tx: any) => tx.amount > SAVINGS_WITHDRAWAL_THRESHOLD
+    );
+    if (hasLargeWithdrawal) {
+      await disqualifyUser(
+        supabase,
+        userId,
+        challengeId,
+        'Withdrawal detected from linked savings account',
+        ['savings']
+      );
+      return; // No need to check no-spend after a savings disqualification
+    }
+  }
+
+  // ── No-spend category violation ───────────────────────────────────────────
+  const { data: declaredCategories } = await supabase
+    .from('user_no_spend_categories')
+    .select('plaid_category')
+    .eq('user_id', userId)
+    .eq('challenge_id', challengeId);
+
+  if (!declaredCategories || declaredCategories.length === 0) return;
+
+  const categorySet = new Set(declaredCategories.map((c: any) => c.plaid_category));
+
+  const violatingTx = newDebits.find((tx: any) => {
+    const primary = tx.personal_finance_category?.primary;
+    return primary && categorySet.has(primary);
+  });
+
+  if (violatingTx) {
+    const categoryLabel = violatingTx.personal_finance_category?.primary ?? 'declared category';
+    await disqualifyUser(
+      supabase,
+      userId,
+      challengeId,
+      `Spending detected in declared no-spend category: ${categoryLabel} (${violatingTx.name} on ${violatingTx.date})`,
+      ['no_spend']
+    );
+  }
+}
+
+/**
+ * Marks a participant as disqualified.
+ * Deletes task completions for the affected task types, recalculates total points,
+ * then sets is_disqualified = true with the given reason.
+ */
+async function disqualifyUser(
+  supabase: any,
+  userId: string,
+  challengeId: string,
+  reason: string,
+  affectedTaskTypes: string[]
+): Promise<void> {
+  // Fetch tasks of the affected types for this challenge
+  const { data: affectedTasks } = await supabase
+    .from('tasks')
+    .select('id')
+    .eq('challenge_id', challengeId)
+    .in('task_type', affectedTaskTypes);
+
+  if (affectedTasks && affectedTasks.length > 0) {
+    await supabase
+      .from('task_completions')
+      .delete()
+      .eq('user_id', userId)
+      .in('task_id', affectedTasks.map((t: any) => t.id));
+  }
+
+  // Recalculate points from remaining completions
+  const { data: remaining } = await supabase
+    .from('task_completions')
+    .select('tasks!inner(points)')
+    .eq('user_id', userId)
+    .eq('challenge_id', challengeId);
+
+  const newPoints = (remaining ?? []).reduce(
+    (sum: number, c: any) => sum + ((c.tasks as any)?.points ?? 0),
+    0
+  );
+
+  await supabase
+    .from('challenge_participants')
+    .update({
+      is_disqualified: true,
+      disqualification_reason: reason,
+      points: newPoints,
+    })
+    .eq('user_id', userId)
+    .eq('challenge_id', challengeId);
+}
 
 async function syncIncremental(accessToken: string, cursor: string | null) {
   const added: any[] = [];

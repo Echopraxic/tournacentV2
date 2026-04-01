@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Share,
   Platform,
+  TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,7 +22,7 @@ const APP_STORE_URL = 'https://apps.apple.com/app/tournacent/id000000000'; // pl
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.tournacent'; // placeholder
 const INVITE_BASE_URL = 'https://tournacent.app/join';
 
-export default function ChallengesScreen() {
+export default function BrowseScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const [selectedPreset, setSelectedPreset] = useState<PresetChallenge | null>(null);
@@ -30,10 +31,45 @@ export default function ChallengesScreen() {
   const [inviteCode, setInviteCode] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
 
+  // Join-with-code modal
+  const [showCodeEntry, setShowCodeEntry] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+
   const insertTasksFromPreset = async (preset: PresetChallenge, challengeId: string) => {
     await supabase.from('tasks').insert(
       preset.tasks.map((t) => ({ ...t, challenge_id: challengeId }))
     );
+  };
+
+  const checkNoActiveChallenge = async (): Promise<boolean> => {
+    const { data } = await supabase
+      .from('challenge_participants')
+      .select('challenge_id, challenges(status)')
+      .eq('user_id', user!.id)
+      .is('dropped_out_at', null);
+    return !data?.some((p: any) => ['pending', 'active'].includes(p.challenges?.status));
+  };
+
+  const handleJoinWithCode = async () => {
+    if (!codeInput || !user) return;
+    setLookingUp(true);
+    setCodeError(null);
+    try {
+      const { data, error } = await supabase.rpc('get_challenge_by_invite_code', { code: codeInput });
+      if (error || !data?.length) {
+        setCodeError('Invalid invite code or the challenge has expired.');
+        return;
+      }
+      setShowCodeEntry(false);
+      setCodeInput('');
+      router.push(`/join/${codeInput}`);
+    } catch {
+      setCodeError('Something went wrong. Please try again.');
+    } finally {
+      setLookingUp(false);
+    }
   };
 
   const handleJoinSolo = async () => {
@@ -41,10 +77,14 @@ export default function ChallengesScreen() {
     setJoining(true);
     setJoinError(null);
     try {
+      const canJoin = await checkNoActiveChallenge();
+      if (!canJoin) {
+        setJoinError('You are already in an active challenge. Drop out first to join a new one.');
+        return;
+      }
+
       const now = new Date();
-      const endDate = new Date(
-        now.getTime() + selectedPreset.duration_days * 24 * 60 * 60 * 1000
-      );
+      const endDate = new Date(now.getTime() + selectedPreset.duration_days * 24 * 60 * 60 * 1000);
 
       const { data: newChallenge, error } = await supabase
         .from('challenges')
@@ -88,6 +128,12 @@ export default function ChallengesScreen() {
     setJoining(true);
     setJoinError(null);
     try {
+      const canJoin = await checkNoActiveChallenge();
+      if (!canJoin) {
+        setJoinError('You are already in an active challenge. Drop out first to start a new one.');
+        return;
+      }
+
       const { data: code, error: codeError } = await supabase.rpc('generate_invite_code');
       if (codeError) throw codeError;
 
@@ -167,11 +213,10 @@ export default function ChallengesScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backButton}>Back</Text>
+        <Text style={styles.headerTitle}>Browse Challenges</Text>
+        <TouchableOpacity onPress={() => { setShowCodeEntry(true); setCodeError(null); }}>
+          <Text style={styles.enterCodeButton}>Enter Code</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Available Challenges</Text>
-        <View style={{ width: 60 }} />
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
@@ -195,9 +240,7 @@ export default function ChallengesScreen() {
               </View>
               <View style={styles.detailItem}>
                 <DollarSign size={16} color="#6B7280" />
-                <Text style={styles.detailText}>
-                  ${preset.buy_in_amount.toFixed(2)} buy-in
-                </Text>
+                <Text style={styles.detailText}>${preset.buy_in_amount.toFixed(2)} buy-in</Text>
               </View>
               <View style={styles.detailItem}>
                 <Users size={16} color="#6B7280" />
@@ -208,7 +251,47 @@ export default function ChallengesScreen() {
         ))}
       </ScrollView>
 
-      {/* ── Bottom-sheet modal ── */}
+      {/* ── Join with code modal ── */}
+      {showCodeEntry && (
+        <View style={styles.overlay}>
+          <TouchableOpacity
+            style={styles.overlayBackdrop}
+            onPress={() => { setShowCodeEntry(false); setCodeInput(''); setCodeError(null); }}
+          />
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Join with Invite Code</Text>
+            <Text style={styles.sheetSubtitle}>Enter a TC-XXXX code shared by a friend</Text>
+            <TextInput
+              style={styles.codeInputField}
+              value={codeInput}
+              onChangeText={(t) => setCodeInput(t.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
+              placeholder="TC-XXXX"
+              placeholderTextColor="#9CA3AF"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={7}
+            />
+            {codeError && <Text style={styles.errorText}>{codeError}</Text>}
+            <TouchableOpacity
+              style={[styles.primaryButton, (lookingUp || codeInput.length < 7) && styles.buttonDisabled]}
+              onPress={handleJoinWithCode}
+              disabled={lookingUp || codeInput.length < 7}
+            >
+              <Text style={styles.primaryButtonText}>
+                {lookingUp ? 'Looking up…' : 'Find Challenge'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { setShowCodeEntry(false); setCodeInput(''); setCodeError(null); }}
+              style={styles.cancelLink}
+            >
+              <Text style={styles.cancelLinkText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* ── Preset selection modal ── */}
       {selectedPreset && step && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.overlayBackdrop} onPress={closeModal} />
@@ -330,15 +413,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     paddingTop: 60,
     paddingBottom: 16,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: { fontSize: 18, fontWeight: '600', color: '#111827' },
-  backButton: { fontSize: 16, color: '#10B981', fontWeight: '600', paddingHorizontal: 8 },
+  headerTitle: { fontSize: 28, fontWeight: '700', color: '#111827' },
+  enterCodeButton: { fontSize: 15, color: '#10B981', fontWeight: '600' },
   scrollView: { flex: 1 },
   content: { padding: 16, gap: 12, paddingBottom: 32 },
   challengeCard: {
@@ -355,7 +438,7 @@ const styles = StyleSheet.create({
   detailItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   detailText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
 
-  // ── Modal ──────────────────────────────────────────────────────────────────
+  // ── Modals ─────────────────────────────────────────────────────────────────
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end' },
   overlayBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -372,13 +455,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 22, fontWeight: '700', color: '#111827' },
   sheetSubtitle: { fontSize: 14, color: '#6B7280', lineHeight: 20, marginTop: -8 },
 
-  typeCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    padding: 16,
-    gap: 6,
-  },
+  typeCard: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 14, padding: 16, gap: 6 },
   typeCardGroup: { backgroundColor: '#10B981', borderColor: '#10B981' },
   typeCardTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
   typeCardDesc: { fontSize: 13, color: '#6B7280', lineHeight: 18 },
@@ -398,6 +475,20 @@ const styles = StyleSheet.create({
   },
   codeText: { fontSize: 32, fontWeight: '800', color: '#111827', letterSpacing: 4 },
 
+  codeInputField: {
+    borderWidth: 2,
+    borderColor: '#10B981',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#111827',
+    textAlign: 'center',
+    letterSpacing: 6,
+    backgroundColor: '#F3F4F6',
+  },
+
   shareButton: {
     backgroundColor: '#10B981',
     borderRadius: 12,
@@ -409,12 +500,7 @@ const styles = StyleSheet.create({
   },
   shareButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
 
-  primaryButton: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
+  primaryButton: { backgroundColor: '#111827', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   buttonDisabled: { opacity: 0.5 },
 

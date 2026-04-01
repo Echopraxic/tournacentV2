@@ -1,6 +1,7 @@
 export type TaskType =
   | 'savings'
   | 'no_spend'
+  | 'no_spend_declare'
   | 'budget'
   | 'tracking'
   | 'cooking'
@@ -114,7 +115,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         description: 'Choose 3 categories you will not purchase from during the challenge',
         points: 20,
         is_mandatory: true,
-        task_type: 'no_spend',
+        task_type: 'no_spend_declare',
       },
       {
         title: '7-Day No-Spend Streak',

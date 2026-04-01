@@ -101,9 +101,12 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 5. Leaderboard updates
 
 ### Drop Out
-- On Home screen, tap **Drop Out**
+- On Home screen, tap **Drop Out** (available in pending, buy-in, and active states)
 - Inline confirmation appears (no popup)
-- Confirm → removed from challenge
+- Confirm → participation record stamped with `dropped_out_at` (soft-delete, not deleted)
+- Home screen resets to "No Active Challenge"
+- Dropped-out player appears on the leaderboard with a grey "Dropped Out" badge
+- Re-joining the same challenge via the invite link is blocked
 
 ---
 

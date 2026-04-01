@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, ListTodo, Wallet, Trophy } from 'lucide-react-native';
+import { Home, ListTodo, Wallet, Trophy, Compass } from 'lucide-react-native';
 
 export default function TabsLayout() {
   return (
@@ -48,6 +48,13 @@ export default function TabsLayout() {
         options={{
           title: 'Leaderboard',
           tabBarIcon: ({ color, size }) => <Trophy color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="browse"
+        options={{
+          title: 'Browse',
+          tabBarIcon: ({ color, size }) => <Compass color={color} size={size} />,
         }}
       />
     </Tabs>

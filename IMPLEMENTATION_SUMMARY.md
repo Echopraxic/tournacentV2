@@ -1,6 +1,6 @@
 # Tournacent Implementation Summary
 
-Last updated: 2026-03-30
+Last updated: 2026-04-01
 
 ---
 
@@ -37,7 +37,7 @@ Tournacent is a financial literacy challenge app built with Expo Router + Supaba
 |-------|---------|
 | `profiles` | User display name, avatar |
 | `challenges` | Challenge instances + templates |
-| `challenge_participants` | Who joined what, points, payment_status |
+| `challenge_participants` | Who joined what, points, payment_status, dropped_out_at |
 | `tasks` | Tasks per challenge |
 | `task_completions` | Audit trail of completed tasks |
 | `transactions` | Buy-in / payout / refund records |
@@ -55,6 +55,7 @@ Tournacent is a financial literacy challenge app built with Expo Router + Supaba
 | `buyin_deadline` | challenges | 48h after activation to pay buy-in |
 | `join_deadline` | challenges | 48h after activation to join |
 | `payment_status` | challenge_participants | `'pending'` or `'paid'` |
+| `dropped_out_at` | challenge_participants | Timestamptz set on dropout (soft-delete); `NULL` = active participant |
 
 ### Challenge Status Lifecycle
 
@@ -111,6 +112,7 @@ Tournacent is a financial literacy challenge app built with Expo Router + Supaba
 | Organizers can view own challenges | challenges | `organizer_id = auth.uid()` |
 | Users can view group challenges by invite code | challenges | `invite_code IS NOT NULL AND status IN ('pending','active')` |
 | Participants can view their challenge | challenge_participants | `user_id = auth.uid()` |
+| Active-only participant queries | challenge_participants | Client-side: `.is('dropped_out_at', null)` filter on all home/tasks/leaderboard fetches |
 
 ---
 
@@ -203,7 +205,7 @@ lib/
   plaid.ts                 # Plaid API (calls edge functions)
 
 supabase/
-  migrations/              # 9 migrations, all pushed
+  migrations/              # 10 migrations, all pushed
   functions/
     create-link-token/index.ts
     exchange-token/index.ts
@@ -221,6 +223,7 @@ supabase/
 2. **Plaid not deployed** — Wallet "Connect Bank" button fails silently
 3. **No real payments** — Buy-in is simulated; no money moves
 4. **No auto-cancel cron** — Expired pending challenges stay pending forever server-side
+5. **No buy-in refund on dropout** — `prize_pool` is not decremented when a paid participant drops out; their buy-in forfeits to the remaining pool (behavior matches design intent but is not yet enforced server-side)
 
 ### Medium Priority
 5. **No task auto-verification** — All tasks are self-reported; Plaid data not used

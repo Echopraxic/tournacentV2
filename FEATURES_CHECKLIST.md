@@ -1,6 +1,6 @@
 # Tournacent Features Checklist
 
-Last updated: 2026-03-30
+Last updated: 2026-04-01
 
 ---
 
@@ -79,10 +79,13 @@ Last updated: 2026-03-30
 
 ## Drop Out
 
-- [x] Drop Out button on Home screen active challenge view
+- [x] Drop Out button on Home screen (pending, buy-in, and active states)
 - [x] Inline confirmation (no native Alert.alert)
-- [x] Removes participant record from DB on confirm
-- [x] Home screen resets to "No Active Challenge" state
+- [x] Soft-delete: sets `dropped_out_at` timestamp on participant record (not a hard DELETE)
+- [x] Home screen resets to "No Active Challenge" immediately after dropout
+- [x] Tasks screen excludes dropped-out participations
+- [x] Leaderboard excludes current user if they dropped out; shows "Dropped Out" badge for other dropped players
+- [x] Join screen blocks re-joining after dropout ("You already dropped out of this challenge and cannot rejoin")
 - [ ] **MISSING: Buy-in refund on drop out** — user's buy-in is not returned and the prize pool is not decremented. Forfeit behavior is not yet defined or enforced.
 
 ---
@@ -124,7 +127,8 @@ Last updated: 2026-03-30
 - [x] Ranked participant list with points
 - [x] Current user highlighted in green
 - [x] 1st place crown icon
-- [x] Disqualified players shown in gray
+- [x] Disqualified players shown in gray with "Disqualified" badge
+- [x] Dropped-out players shown in gray with "Dropped Out" badge, sorted below active and disqualified players
 - [x] Task completion progress bars per player
 - [x] Refresh control
 

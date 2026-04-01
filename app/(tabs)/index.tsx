@@ -64,11 +64,12 @@ export default function Home() {
     if (!user) return;
 
     try {
-      // Fetch all participations, find the most relevant active/pending one
+      // Fetch all active (non-dropped-out) participations
       const { data: allParticipations } = await supabase
         .from('challenge_participants')
         .select('challenge_id, points, rank, payment_status, challenges(*)')
         .eq('user_id', user.id)
+        .is('dropped_out_at', null)
         .order('joined_at', { ascending: false });
 
       const participantData =
@@ -214,11 +215,30 @@ export default function Home() {
     if (!challenge || !user) return;
     setDroppingOut(true);
     try {
-      await supabase
+      // Count other active participants (excluding current user)
+      const { count } = await supabase
         .from('challenge_participants')
-        .delete()
+        .select('*', { count: 'exact', head: true })
         .eq('challenge_id', challenge.id)
-        .eq('user_id', user.id);
+        .is('dropped_out_at', null)
+        .neq('user_id', user.id);
+
+      if (count === 0) {
+        // Last active player — delete the entire challenge via RPC
+        const { error } = await supabase.rpc('delete_empty_challenge', {
+          p_challenge_id: challenge.id,
+        });
+        if (error) throw error;
+      } else {
+        // Other players remain — soft-delete this participant only
+        const { error } = await supabase
+          .from('challenge_participants')
+          .update({ dropped_out_at: new Date().toISOString() })
+          .eq('challenge_id', challenge.id)
+          .eq('user_id', user.id);
+        if (error) throw error;
+      }
+
       setShowDropWarning(false);
       setChallenge(null);
       setParticipant(null);
@@ -269,7 +289,7 @@ export default function Home() {
           </Text>
           <TouchableOpacity
             style={styles.browseButton}
-            onPress={() => router.push('/challenges')}
+            onPress={() => router.push('/(tabs)/browse')}
           >
             <Text style={styles.browseButtonText}>Browse Challenges</Text>
           </TouchableOpacity>

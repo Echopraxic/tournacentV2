@@ -16,6 +16,7 @@ interface Participant {
   points: number;
   rank: number;
   is_disqualified: boolean;
+  dropped_out_at: string | null;
   profiles: {
     display_name: string;
     avatar_url: string | null;
@@ -32,17 +33,40 @@ export default function Leaderboard() {
   const [totalTasks, setTotalTasks] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isDroppedOut, setIsDroppedOut] = useState(false);
 
   const fetchLeaderboard = async () => {
     if (!user?.id) return;
 
     try {
-      const { data: participantData } = await supabase
+      const { data: allParticipations } = await supabase
         .from('challenge_participants')
-        .select('challenge_id')
+        .select('challenge_id, challenges(*)')
         .eq('user_id', user.id)
-        .eq('challenges.status', 'active')
-        .maybeSingle();
+        .is('dropped_out_at', null)
+        .order('joined_at', { ascending: false });
+
+      let participantData: any =
+        allParticipations?.find((p: any) => p.challenges?.status === 'active') || null;
+      let droppedOut = false;
+
+      if (!participantData) {
+        const { data: droppedParticipations } = await supabase
+          .from('challenge_participants')
+          .select('challenge_id, challenges(*)')
+          .eq('user_id', user.id)
+          .not('dropped_out_at', 'is', null)
+          .order('joined_at', { ascending: false });
+
+        const droppedData =
+          droppedParticipations?.find((p: any) => p.challenges?.status === 'active') || null;
+        if (droppedData) {
+          participantData = droppedData;
+          droppedOut = true;
+        }
+      }
+
+      setIsDroppedOut(droppedOut);
 
       if (participantData) {
         const challengeId = participantData.challenge_id;
@@ -78,10 +102,11 @@ export default function Leaderboard() {
           })
         );
 
-        const qualified = participantsWithRank.filter(p => !p.is_disqualified);
-        const disqualified = participantsWithRank.filter(p => p.is_disqualified);
+        const qualified = participantsWithRank.filter(p => !p.is_disqualified && !p.dropped_out_at);
+        const disqualified = participantsWithRank.filter(p => p.is_disqualified && !p.dropped_out_at);
+        const droppedOut = participantsWithRank.filter(p => p.dropped_out_at);
 
-        const sortedParticipants = [...qualified, ...disqualified];
+        const sortedParticipants = [...qualified, ...disqualified, ...droppedOut];
 
         setParticipants(sortedParticipants as any);
 
@@ -170,41 +195,43 @@ export default function Leaderboard() {
       <View
         style={[
           styles.rankBanner,
-          { backgroundColor: getRankBannerColor(currentUserRank) },
+          { backgroundColor: isDroppedOut ? '#F3F4F6' : getRankBannerColor(currentUserRank) },
         ]}
       >
         <Text style={styles.rankBannerText}>
-          You're in {getRankOrdinal(currentUserRank)} place
+          {isDroppedOut ? 'You dropped out of this challenge' : `You're in ${getRankOrdinal(currentUserRank)} place`}
         </Text>
       </View>
 
-      <View style={styles.statsSection}>
-        <View style={styles.pointsDisplay}>
-          <Text style={styles.pointsValue}>{currentUserPoints}</Text>
-          <Text style={styles.pointsLabel}>out of {maxPoints} points</Text>
-        </View>
-
-        <View style={styles.progressSection}>
-          <View style={styles.progressBarContainer}>
-            {Array.from({ length: totalTasks }).map((_, index) => {
-              const currentUser = participants.find(p => p.user_id === user?.id);
-              const completed = currentUser ? index < currentUser.completed_tasks : false;
-              return (
-                <View
-                  key={index}
-                  style={[
-                    styles.progressSegment,
-                    completed && styles.progressSegmentCompleted,
-                  ]}
-                />
-              );
-            })}
+      {!isDroppedOut && (
+        <View style={styles.statsSection}>
+          <View style={styles.pointsDisplay}>
+            <Text style={styles.pointsValue}>{currentUserPoints}</Text>
+            <Text style={styles.pointsLabel}>out of {maxPoints} points</Text>
           </View>
-          <Text style={styles.progressText}>
-            {participants.find(p => p.user_id === user?.id)?.completed_tasks || 0} of {totalTasks} tasks completed
-          </Text>
+
+          <View style={styles.progressSection}>
+            <View style={styles.progressBarContainer}>
+              {Array.from({ length: totalTasks }).map((_, index) => {
+                const currentUser = participants.find(p => p.user_id === user?.id);
+                const completed = currentUser ? index < currentUser.completed_tasks : false;
+                return (
+                  <View
+                    key={index}
+                    style={[
+                      styles.progressSegment,
+                      completed && styles.progressSegmentCompleted,
+                    ]}
+                  />
+                );
+              })}
+            </View>
+            <Text style={styles.progressText}>
+              {participants.find(p => p.user_id === user?.id)?.completed_tasks || 0} of {totalTasks} tasks completed
+            </Text>
+          </View>
         </View>
-      </View>
+      )}
 
       <ScrollView
         style={styles.scrollView}
@@ -219,7 +246,7 @@ export default function Leaderboard() {
             style={[
               styles.participantCard,
               participant.user_id === user?.id && styles.participantCardHighlight,
-              participant.is_disqualified && styles.participantCardDisqualified,
+              (participant.is_disqualified || participant.dropped_out_at) && styles.participantCardDisqualified,
             ]}
           >
             <View style={styles.participantLeft}>
@@ -241,7 +268,7 @@ export default function Leaderboard() {
                 <Text
                   style={[
                     styles.participantName,
-                    participant.is_disqualified && styles.participantNameDisqualified,
+                    (participant.is_disqualified || participant.dropped_out_at) && styles.participantNameDisqualified,
                   ]}
                 >
                   {participant.profiles.display_name}
@@ -252,6 +279,11 @@ export default function Leaderboard() {
                     <Text style={styles.disqualifiedText}>Disqualified</Text>
                   </View>
                 )}
+                {participant.dropped_out_at && (
+                  <View style={styles.droppedOutBadge}>
+                    <Text style={styles.droppedOutText}>Dropped Out</Text>
+                  </View>
+                )}
               </View>
             </View>
 
@@ -259,7 +291,7 @@ export default function Leaderboard() {
               <Text
                 style={[
                   styles.participantPoints,
-                  participant.is_disqualified && styles.participantPointsDisqualified,
+                  (participant.is_disqualified || participant.dropped_out_at) && styles.participantPointsDisqualified,
                 ]}
               >
                 {participant.points} pts
@@ -271,7 +303,7 @@ export default function Leaderboard() {
                     {
                       width: `${totalTasks > 0 ? (participant.completed_tasks / totalTasks) * 100 : 0}%`,
                     },
-                    participant.is_disqualified && styles.miniProgressFillDisqualified,
+                    (participant.is_disqualified || participant.dropped_out_at) && styles.miniProgressFillDisqualified,
                   ]}
                 />
               </View>
@@ -460,6 +492,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#DC2626',
+  },
+  droppedOutBadge: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  droppedOutText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
   },
   participantRight: {
     alignItems: 'flex-end',

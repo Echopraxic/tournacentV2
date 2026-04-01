@@ -25,6 +25,19 @@ interface Task {
   completed: boolean;
 }
 
+// Plaid primary category → user-friendly label mapping for the no-spend declaration UI.
+// These map to the `personal_finance_category.primary` values Plaid returns.
+const NO_SPEND_CATEGORIES = [
+  { id: 'FOOD_AND_DRINK', label: 'Restaurants & Food Delivery' },
+  { id: 'ENTERTAINMENT', label: 'Entertainment' },
+  { id: 'SHOPPING', label: 'Shopping & Retail' },
+  { id: 'TRAVEL', label: 'Travel' },
+  { id: 'PERSONAL_CARE', label: 'Personal Care' },
+  { id: 'TRANSPORTATION', label: 'Transportation' },
+  { id: 'GENERAL_MERCHANDISE', label: 'General Merchandise' },
+  { id: 'RECREATION', label: 'Recreation' },
+] as const;
+
 export default function Tasks() {
   const { user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -39,17 +52,42 @@ export default function Tasks() {
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const [evidenceUri, setEvidenceUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isDroppedOut, setIsDroppedOut] = useState(false);
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
   const fetchTasks = async () => {
     if (!user) return;
 
     try {
-      const { data: participantData } = await supabase
+      const { data: allParticipations } = await supabase
         .from('challenge_participants')
         .select('challenge_id, points, challenges(*)')
         .eq('user_id', user.id)
-        .eq('challenges.status', 'active')
-        .maybeSingle();
+        .is('dropped_out_at', null)
+        .order('joined_at', { ascending: false });
+
+      let participantData: any =
+        allParticipations?.find((p: any) => p.challenges?.status === 'active') || null;
+      let droppedOut = false;
+
+      if (!participantData) {
+        const { data: droppedParticipations } = await supabase
+          .from('challenge_participants')
+          .select('challenge_id, points, challenges(*)')
+          .eq('user_id', user.id)
+          .not('dropped_out_at', 'is', null)
+          .order('joined_at', { ascending: false });
+
+        const droppedData =
+          droppedParticipations?.find((p: any) => p.challenges?.status === 'active') || null;
+        if (droppedData) {
+          participantData = droppedData;
+          droppedOut = true;
+        }
+      }
+
+      setIsDroppedOut(droppedOut);
 
       if (participantData) {
         setChallengeId(participantData.challenge_id);
@@ -101,9 +139,61 @@ export default function Tasks() {
 
   const handleTaskPress = (task: Task) => {
     if (!task.completed) {
-      setSelectedTask(task);
-      setEvidenceUri(null);
-      setModalVisible(true);
+      if (task.task_type === 'no_spend_declare') {
+        setSelectedTask(task);
+        setSelectedCategories([]);
+        setCategoryPickerVisible(true);
+      } else {
+        setSelectedTask(task);
+        setEvidenceUri(null);
+        setModalVisible(true);
+      }
+    }
+  };
+
+  const toggleCategory = (id: string) => {
+    setSelectedCategories((prev) => {
+      if (prev.includes(id)) return prev.filter((c) => c !== id);
+      if (prev.length >= 3) return prev;
+      return [...prev, id];
+    });
+  };
+
+  const handleDeclareCategories = async () => {
+    if (!selectedTask || !challengeId || !user || selectedCategories.length !== 3) return;
+    setUploading(true);
+    try {
+      const { error } = await supabase.from('user_no_spend_categories').insert(
+        selectedCategories.map((cat) => ({
+          user_id: user.id,
+          challenge_id: challengeId,
+          plaid_category: cat,
+        }))
+      );
+      if (error) throw error;
+
+      await supabase.from('task_completions').insert({
+        task_id: selectedTask.id,
+        user_id: user.id,
+        challenge_id: challengeId,
+      });
+
+      await supabase
+        .from('challenge_participants')
+        .update({ points: totalPoints + selectedTask.points })
+        .eq('user_id', user.id)
+        .eq('challenge_id', challengeId);
+
+      setCategoryPickerVisible(false);
+      setSelectedCategories([]);
+      setFeedback({ message: `Categories declared! +${selectedTask.points} points`, isError: false });
+      setTimeout(() => setFeedback(null), 3000);
+      fetchTasks();
+    } catch (error: any) {
+      setFeedback({ message: error.message || 'Failed to save categories', isError: true });
+      setTimeout(() => setFeedback(null), 3000);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -142,6 +232,7 @@ export default function Tasks() {
 
     try {
       // Run Plaid-backed verification for savings, no-spend, and tracking tasks
+      // no_spend_declare is handled separately by handleDeclareCategories
       const plaidVerifiedTypes = ['savings', 'no_spend', 'tracking'];
       if (plaidVerifiedTypes.includes(selectedTask.task_type)) {
         const verification = await verifyTaskCompletion(
@@ -196,6 +287,7 @@ export default function Tasks() {
     const colors: Record<string, string> = {
       savings: '#A78BFA',
       no_spend: '#84CC16',
+      no_spend_declare: '#84CC16',
       budget: '#3B82F6',
       tracking: '#8B5CF6',
       cooking: '#F59E0B',
@@ -234,6 +326,72 @@ export default function Tasks() {
             Join a challenge to see your tasks
           </Text>
         </View>
+      </View>
+    );
+  }
+
+  if (isDroppedOut) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Tasks</Text>
+        </View>
+        <View style={styles.droppedOutBanner}>
+          <Text style={styles.droppedOutBannerTitle}>You've dropped out</Text>
+          <Text style={styles.droppedOutBannerText}>
+            You can view tasks but can no longer complete them.
+          </Text>
+        </View>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {tasks.map((task) => (
+            <View
+              key={task.id}
+              style={[styles.taskCard, styles.taskCardDisabled]}
+            >
+              <View style={styles.taskContent}>
+                <View style={styles.taskLeft}>
+                  {task.completed ? (
+                    <CheckCircle2 color="#10B981" size={24} />
+                  ) : (
+                    <Circle color="#D1D5DB" size={24} />
+                  )}
+                  <View style={styles.taskInfo}>
+                    <View style={styles.taskTitleRow}>
+                      <Text style={[styles.taskTitle, styles.taskTitleDisabled]}>
+                        {task.title}
+                      </Text>
+                      {task.is_mandatory && (
+                        <AlertTriangle color="#D1D5DB" size={16} />
+                      )}
+                    </View>
+                    <Text style={styles.taskDescription}>{task.description}</Text>
+                    <View
+                      style={[
+                        styles.taskTypeBadge,
+                        { backgroundColor: '#F3F4F620' },
+                      ]}
+                    >
+                      <Text style={[styles.taskTypeText, { color: '#9CA3AF' }]}>
+                        {task.task_type}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={[styles.pointsBadge, styles.pointsBadgeDisabled]}>
+                  <Text style={[styles.pointsText, styles.pointsTextDisabled]}>
+                    {task.points}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
       </View>
     );
   }
@@ -350,6 +508,75 @@ export default function Tasks() {
           </TouchableOpacity>
         ))}
       </ScrollView>
+
+      {/* Category declaration modal for no_spend_declare tasks */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={categoryPickerVisible}
+        onRequestClose={() => setCategoryPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Declare No-Spend Categories</Text>
+            <Text style={styles.modalDescription}>
+              Choose exactly 3 spending categories you'll avoid for the entire challenge.
+              Any transaction in these categories will break your streak.
+            </Text>
+            <Text style={styles.categoryCount}>
+              {selectedCategories.length} / 3 selected
+            </Text>
+            <View style={styles.categoryGrid}>
+              {NO_SPEND_CATEGORIES.map((cat) => {
+                const selected = selectedCategories.includes(cat.id);
+                const disabled = !selected && selectedCategories.length >= 3;
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[
+                      styles.categoryChip,
+                      selected && styles.categoryChipSelected,
+                      disabled && styles.categoryChipDisabled,
+                    ]}
+                    onPress={() => toggleCategory(cat.id)}
+                    disabled={disabled}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryChipText,
+                        selected && styles.categoryChipTextSelected,
+                        disabled && styles.categoryChipTextDisabled,
+                      ]}
+                    >
+                      {cat.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalButtonCancel}
+                onPress={() => setCategoryPickerVisible(false)}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalButtonConfirm,
+                  (selectedCategories.length !== 3 || uploading) && styles.modalButtonDisabled,
+                ]}
+                onPress={handleDeclareCategories}
+                disabled={selectedCategories.length !== 3 || uploading}
+              >
+                <Text style={styles.modalButtonConfirmText}>
+                  {uploading ? 'Saving…' : `Confirm (+${selectedTask?.points ?? 0} pts)`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         animationType="slide"
@@ -559,6 +786,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#D1FAE5',
   },
+  taskCardDisabled: {
+    backgroundColor: '#F9FAFB',
+    opacity: 0.7,
+  },
+  taskTitleDisabled: {
+    color: '#9CA3AF',
+  },
+  pointsBadgeDisabled: {
+    backgroundColor: '#F3F4F6',
+  },
+  pointsTextDisabled: {
+    color: '#9CA3AF',
+  },
+  droppedOutBanner: {
+    backgroundColor: '#F3F4F6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    padding: 20,
+    alignItems: 'center',
+    gap: 4,
+  },
+  droppedOutBannerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  droppedOutBannerText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
   taskContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -706,5 +964,45 @@ const styles = StyleSheet.create({
     color: '#10B981',
     textAlign: 'center',
     marginTop: -4,
+  },
+  categoryCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: -4,
+  },
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  categoryChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  categoryChipSelected: {
+    borderColor: '#84CC16',
+    backgroundColor: '#F7FEE7',
+  },
+  categoryChipDisabled: {
+    borderColor: '#F3F4F6',
+    backgroundColor: '#F9FAFB',
+  },
+  categoryChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  categoryChipTextSelected: {
+    color: '#4D7C0F',
+  },
+  categoryChipTextDisabled: {
+    color: '#D1D5DB',
   },
 });

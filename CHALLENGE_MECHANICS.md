@@ -206,7 +206,8 @@ User is disqualified if:
 ### Leaderboard Status
 
 - **Active:** User is eligible for prize
-- **Disqualified:** User removed from prize eligibility but visible on leaderboard (gray styling)
+- **Disqualified:** User removed from prize eligibility but visible on leaderboard (gray styling with "Disqualified" badge)
+- **Dropped Out:** User voluntarily left the challenge; visible on leaderboard at the bottom (gray styling with "Dropped Out" badge); cannot rejoin via invite link
 - **Not Ranked:** User hasn't completed any tasks yet
 
 ---
@@ -247,7 +248,7 @@ User is disqualified if:
 
 ### Database Tracking
 
-- `challenge_participants`: points, is_disqualified, disqualification_reason
+- `challenge_participants`: points, is_disqualified, disqualification_reason, dropped_out_at (soft-delete timestamp)
 - `task_completions`: completed_at timestamp
 - `transactions`: deposit/withdrawal tracking
 - `spending_logs`: daily spending entries (for tracking tasks)

@@ -34,6 +34,8 @@ export default function JoinScreen() {
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [alreadyJoined, setAlreadyJoined] = useState(false);
+  const [droppedOut, setDroppedOut] = useState(false);   // dropped out of active — cannot rejoin
+  const [canRejoin, setCanRejoin] = useState(false);      // dropped out of pending — can rejoin
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -52,15 +54,27 @@ export default function JoinScreen() {
       const c = data[0] as ChallengePreview;
       setChallenge(c);
 
-      // Check if already a participant (only if logged in)
+      // Check participation status (only if logged in)
       if (user) {
         const { data: existing } = await supabase
           .from('challenge_participants')
-          .select('challenge_id')
+          .select('challenge_id, dropped_out_at')
           .eq('challenge_id', c.id)
           .eq('user_id', user.id)
           .maybeSingle();
-        if (existing) setAlreadyJoined(true);
+        if (existing) {
+          if (existing.dropped_out_at) {
+            // Dropped out of a pending challenge → allow rejoin
+            // Dropped out of an active challenge → permanently blocked
+            if (c.status === 'pending') {
+              setCanRejoin(true);
+            } else {
+              setDroppedOut(true);
+            }
+          } else {
+            setAlreadyJoined(true);
+          }
+        }
       }
     } catch {
       setError('Something went wrong. Please try again.');
@@ -69,10 +83,24 @@ export default function JoinScreen() {
     }
   };
 
+  const checkNoActiveChallenge = async (): Promise<boolean> => {
+    const { data } = await supabase
+      .from('challenge_participants')
+      .select('challenge_id, challenges(status)')
+      .eq('user_id', user!.id)
+      .is('dropped_out_at', null);
+    return !data?.some((p: any) => ['pending', 'active'].includes(p.challenges?.status));
+  };
+
   const handleJoin = async () => {
     if (!user || !challenge) return;
     setJoining(true);
     try {
+      const canJoin = await checkNoActiveChallenge();
+      if (!canJoin) {
+        setError('You are already in an active challenge. Drop out first to join a new one.');
+        return;
+      }
       const { error } = await supabase.from('challenge_participants').insert({
         challenge_id: challenge.id,
         user_id: user.id,
@@ -83,6 +111,31 @@ export default function JoinScreen() {
       setTimeout(() => router.replace('/(tabs)'), 1500);
     } catch (err: any) {
       setError(err.message || 'Failed to join challenge.');
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const handleRejoin = async () => {
+    if (!user || !challenge) return;
+    setJoining(true);
+    try {
+      const canJoin = await checkNoActiveChallenge();
+      if (!canJoin) {
+        setError('You are already in an active challenge. Drop out first to rejoin.');
+        return;
+      }
+      // Clear dropped_out_at to restore participation
+      const { error } = await supabase
+        .from('challenge_participants')
+        .update({ dropped_out_at: null })
+        .eq('challenge_id', challenge.id)
+        .eq('user_id', user.id);
+      if (error) throw error;
+      setSuccess(true);
+      setTimeout(() => router.replace('/(tabs)'), 1500);
+    } catch (err: any) {
+      setError(err.message || 'Failed to rejoin challenge.');
     } finally {
       setJoining(false);
     }
@@ -195,6 +248,47 @@ export default function JoinScreen() {
           </>
         )}
 
+        {/* Dropped out of active challenge — permanently blocked */}
+        {user && droppedOut && (
+          <>
+            <View style={styles.closedBadge}>
+              <Text style={styles.closedText}>You dropped out of this challenge and cannot rejoin once it is active.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => router.replace('/(tabs)')}
+            >
+              <Text style={styles.secondaryButtonText}>Back to App</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Dropped out of pending challenge — can rejoin */}
+        {user && canRejoin && !success && (
+          <>
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                You previously left this challenge. You can rejoin while it's still waiting for players.
+              </Text>
+            </View>
+            {isJoinable() ? (
+              <TouchableOpacity
+                style={[styles.primaryButton, joining && styles.buttonDisabled]}
+                onPress={handleRejoin}
+                disabled={joining}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {joining ? 'Rejoining…' : 'Rejoin Challenge'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.closedBadge}>
+                <Text style={styles.closedText}>This challenge is no longer accepting players</Text>
+              </View>
+            )}
+          </>
+        )}
+
         {/* Already joined */}
         {user && alreadyJoined && (
           <>
@@ -217,8 +311,8 @@ export default function JoinScreen() {
           </View>
         )}
 
-        {/* Join button */}
-        {user && !alreadyJoined && !success && (
+        {/* Join button — new participants only */}
+        {user && !alreadyJoined && !droppedOut && !canRejoin && !success && (
           <>
             {isJoinable() ? (
               <TouchableOpacity

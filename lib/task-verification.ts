@@ -152,8 +152,20 @@ const verifySavingsTask = async (
 };
 
 /**
- * Verifies a no-spend streak by checking Plaid transactions for spending in
- * the user's declared categories. Any transaction in a declared category breaks the streak.
+ * Verifies a no-spend streak by checking Plaid transactions only in the
+ * categories the user declared they would avoid.
+ *
+ * Flow:
+ *  1. Confirm the user has a linked bank account.
+ *  2. Load their declared categories from user_no_spend_categories.
+ *  3. Confirm enough time has elapsed for the streak period.
+ *  4. Scan bank_transactions for any settled debit whose stored category
+ *     matches one of the declared categories during the streak window.
+ *  5. Clean/disqualify if violated; award points if clean.
+ *
+ * Plaid primary category values stored in bank_transactions.category[0]:
+ *   FOOD_AND_DRINK, ENTERTAINMENT, SHOPPING, TRAVEL, PERSONAL_CARE,
+ *   TRANSPORTATION, GENERAL_MERCHANDISE, RECREATION, etc.
  */
 const verifyNoSpendTask = async (
   userId: string,
@@ -161,7 +173,6 @@ const verifyNoSpendTask = async (
   task: any,
   challenge: any
 ): Promise<VerificationResult> => {
-  // Check if user has a linked bank account
   const { data: plaidItem } = await supabase
     .from('plaid_items')
     .select('id')
@@ -175,41 +186,69 @@ const verifyNoSpendTask = async (
     };
   }
 
-  const challengeStart = challenge.start_date;
+  // Load declared categories — must exist before streak tasks can be verified
+  const { data: declaredCategories } = await supabase
+    .from('user_no_spend_categories')
+    .select('plaid_category')
+    .eq('user_id', userId)
+    .eq('challenge_id', challengeId);
 
-  // Determine required streak days from task points
-  // 40 pts = 7-day streak, 60 pts = 14-day streak (per QUICK_START.md)
+  if (!declaredCategories || declaredCategories.length === 0) {
+    return {
+      success: false,
+      message: 'Complete the "Declare 3 Spending Categories" task before claiming streak tasks.',
+    };
+  }
+
+  const categoryList = declaredCategories.map((c: any) => c.plaid_category as string);
+
+  const challengeStart = challenge.start_date.split('T')[0];
+
+  // 40 pts = 7-day streak, 60 pts = 14-day streak
   const requiredDays = task.points >= 60 ? 14 : 7;
-  const streakCutoff = new Date(
+  const streakEnd = new Date(
     new Date(challengeStart).getTime() + requiredDays * 24 * 60 * 60 * 1000
-  )
-    .toISOString()
-    .split('T')[0];
+  ).toISOString().split('T')[0];
 
   const today = new Date().toISOString().split('T')[0];
-  const checkUntil = today < streakCutoff ? today : streakCutoff;
 
-  // Check for any spending (positive Plaid amounts = debits) during the streak window
-  const { data: spendingTransactions } = await supabase
+  if (today < streakEnd) {
+    const daysLeft = Math.ceil(
+      (new Date(streakEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    );
+    return {
+      success: false,
+      message: `${requiredDays}-day streak not complete yet. ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining.`,
+    };
+  }
+
+  // Fetch settled debits during the streak window
+  const { data: debits } = await supabase
     .from('bank_transactions')
-    .select('amount, date, name, category')
+    .select('name, date, amount, category')
     .eq('user_id', userId)
     .gte('date', challengeStart)
-    .lte('date', checkUntil)
+    .lte('date', streakEnd)
     .gt('amount', 0) // positive = debit/spending in Plaid
     .eq('pending', false);
 
-  if (spendingTransactions && spendingTransactions.length > 0) {
+  // Check if any debit falls in a declared category
+  const violatingTx = debits?.find((tx: any) => {
+    const primary = Array.isArray(tx.category) ? tx.category[0] : null;
+    return primary && categoryList.includes(primary);
+  });
+
+  if (violatingTx) {
     return {
       success: false,
-      message: `Spending detected during the ${requiredDays}-day no-spend window. Streak broken.`,
+      message: `Spending detected in a declared no-spend category (${violatingTx.name} on ${violatingTx.date}). Streak broken.`,
       streakBroken: true,
     };
   }
 
   return {
     success: true,
-    message: `${requiredDays}-day no-spend streak verified via linked bank account.`,
+    message: `${requiredDays}-day no-spend streak verified — no spending in your declared categories.`,
   };
 };
 

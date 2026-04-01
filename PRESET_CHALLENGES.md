@@ -249,6 +249,7 @@ For these tasks, users manually log:
 Prize Pool = Buy-In Amount × Number of Active (Non-Disqualified) Participants
 Winner = Player with highest points at end of challenge
 Disqualified Players = Removed from eligibility, but their buy-in stays in pool
+Dropped-Out Players  = Voluntarily left; buy-in stays in pool, cannot rejoin
 ```
 
 ### Example Scenarios
@@ -265,6 +266,14 @@ Disqualified Players = Removed from eligibility, but their buy-in stays in pool
 - Player 4 (100 pts) - Active
 - Prize pool: $80 (stays same, disqualified player's $20 doesn't return)
 - Winner receives $80
+
+**Scenario 3: 4 players, $20 buy-in each — one drops out**
+- Player 1 (250 pts) - Active
+- Player 2 (180 pts) - Active
+- Player 3 (dropped out mid-challenge, had paid buy-in)
+- Player 4 (100 pts) - Active
+- Prize pool: $80 (dropped player's $20 stays in pool; cannot rejoin)
+- Winner receives $80; Player 3 appears on leaderboard with "Dropped Out" badge
 
 ---
 
