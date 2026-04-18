@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,14 @@ import {
   ScrollView,
   RefreshControl,
 } from 'react-native';
+import Animated, { SharedValue, useAnimatedStyle } from 'react-native-reanimated';
+import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { ThemeColors } from '@/constants/tokens';
+import { useLeaderboardReorder } from '@/hooks/animations/useLeaderboardReorder';
+import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Crown, Trophy } from 'lucide-react-native';
 
 interface Participant {
@@ -24,8 +30,105 @@ interface Participant {
   completed_tasks: number;
 }
 
+// ── Per-row subcomponent so useAnimatedStyle is called at a component's top
+// level, not inside a loop in the parent. ─────────────────────────────────────
+interface AnimatedRowProps {
+  participant: Participant;
+  isCurrentUser: boolean;
+  totalTasks: number;
+  theme: ThemeColors;
+  translateY: SharedValue<number> | undefined;
+  rankScale: SharedValue<number> | undefined;
+  getInitials: (name: string) => string;
+}
+
+function AnimatedParticipantRow({
+  participant,
+  isCurrentUser,
+  totalTasks,
+  theme,
+  translateY,
+  rankScale,
+  getInitials,
+}: AnimatedRowProps) {
+  const rowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY?.value ?? 0 }],
+  }));
+  const rankPulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: rankScale?.value ?? 1 }],
+  }));
+
+  const isInactive = participant.is_disqualified || !!participant.dropped_out_at;
+
+  return (
+    <Animated.View
+      style={[
+        styles.participantCard,
+        { backgroundColor: theme.surface },
+        isCurrentUser && styles.participantCardHighlight,
+        isInactive && styles.participantCardDisqualified,
+        rowStyle,
+      ]}
+    >
+      <View style={styles.participantLeft}>
+        <View style={styles.rankContainer}>
+          {participant.rank === 1 && !participant.is_disqualified ? (
+            <Crown color="#F59E0B" size={20} />
+          ) : (
+            <Animated.Text style={[styles.rankNumber, { color: theme.subtext }, rankPulseStyle]}>
+              {participant.rank}
+            </Animated.Text>
+          )}
+        </View>
+
+        <View style={[styles.avatar, { backgroundColor: '#DBEAFE' }]}>
+          <Text style={[styles.avatarText, { color: '#1D4ED8' }]}>
+            {getInitials(participant.profiles.display_name)}
+          </Text>
+        </View>
+
+        <View style={styles.participantInfo}>
+          <Text
+            style={[
+              styles.participantName,
+              { color: isInactive ? theme.subtext : theme.text },
+            ]}
+          >
+            {participant.profiles.display_name}
+            {isCurrentUser && ' (You)'}
+          </Text>
+          {participant.is_disqualified && (
+            <View style={styles.disqualifiedBadge}>
+              <Text style={styles.disqualifiedText}>Disqualified</Text>
+            </View>
+          )}
+          {participant.dropped_out_at && (
+            <View style={styles.droppedOutBadge}>
+              <Text style={styles.droppedOutText}>Dropped Out</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.participantRight}>
+        <Text style={[styles.participantPoints, { color: isInactive ? theme.subtext : theme.text }]}>
+          {participant.points} pts
+        </Text>
+        <ProgressBar
+          progress={totalTasks > 0 ? participant.completed_tasks / totalTasks : 0}
+          height={4}
+          trackColor={isInactive ? '#E5E7EB' : undefined}
+        />
+      </View>
+    </Animated.View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Leaderboard() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [currentUserRank, setCurrentUserRank] = useState<number>(1);
   const [currentUserPoints, setCurrentUserPoints] = useState<number>(0);
@@ -128,6 +231,14 @@ export default function Leaderboard() {
     fetchLeaderboard();
   }, [user]);
 
+  // Re-fetch every time this tab comes into focus so points stay in sync
+  // with the Tasks screen, which updates challenge_participants.points directly.
+  useFocusEffect(
+    useCallback(() => {
+      if (user) fetchLeaderboard();
+    }, [user])
+  );
+
   const onRefresh = () => {
     setRefreshing(true);
     fetchLeaderboard();
@@ -156,14 +267,19 @@ export default function Leaderboard() {
 
   const progressPercentage = maxPoints > 0 ? (currentUserPoints / maxPoints) * 100 : 0;
 
+  // Animated reorder — hook must always be called, even before early returns
+  const rowAnimations = useLeaderboardReorder(
+    participants.map((p) => ({ user_id: p.user_id, rank: p.rank }))
+  );
+
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Leaderboard</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Leaderboard</Text>
         </View>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={[styles.loadingText, { color: theme.subtext }]}>Loading...</Text>
         </View>
       </View>
     );
@@ -171,14 +287,14 @@ export default function Leaderboard() {
 
   if (participants.length === 0) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Leaderboard</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Leaderboard</Text>
         </View>
         <View style={styles.emptyContainer}>
-          <Trophy color="#D1D5DB" size={64} />
-          <Text style={styles.emptyTitle}>No Active Challenge</Text>
-          <Text style={styles.emptyText}>
+          <Trophy color={theme.subtext} size={64} />
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>No Active Challenge</Text>
+          <Text style={[styles.emptyText, { color: theme.subtext }]}>
             Join a challenge to compete on the leaderboard
           </Text>
         </View>
@@ -186,10 +302,12 @@ export default function Leaderboard() {
     );
   }
 
+  const completedByCurrentUser = participants.find(p => p.user_id === user?.id)?.completed_tasks ?? 0;
+
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Leaderboard</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Leaderboard</Text>
       </View>
 
       <View
@@ -198,36 +316,21 @@ export default function Leaderboard() {
           { backgroundColor: isDroppedOut ? '#F3F4F6' : getRankBannerColor(currentUserRank) },
         ]}
       >
-        <Text style={styles.rankBannerText}>
+        <Text style={[styles.rankBannerText, { color: theme.text }]}>
           {isDroppedOut ? 'You dropped out of this challenge' : `You're in ${getRankOrdinal(currentUserRank)} place`}
         </Text>
       </View>
 
       {!isDroppedOut && (
-        <View style={styles.statsSection}>
+        <View style={[styles.statsSection, { backgroundColor: theme.surface }]}>
           <View style={styles.pointsDisplay}>
-            <Text style={styles.pointsValue}>{currentUserPoints}</Text>
-            <Text style={styles.pointsLabel}>out of {maxPoints} points</Text>
+            <Text style={[styles.pointsValue, { color: theme.primary }]}>{currentUserPoints}</Text>
+            <Text style={[styles.pointsLabel, { color: theme.subtext }]}>out of {maxPoints} points</Text>
           </View>
-
           <View style={styles.progressSection}>
-            <View style={styles.progressBarContainer}>
-              {Array.from({ length: totalTasks }).map((_, index) => {
-                const currentUser = participants.find(p => p.user_id === user?.id);
-                const completed = currentUser ? index < currentUser.completed_tasks : false;
-                return (
-                  <View
-                    key={index}
-                    style={[
-                      styles.progressSegment,
-                      completed && styles.progressSegmentCompleted,
-                    ]}
-                  />
-                );
-              })}
-            </View>
-            <Text style={styles.progressText}>
-              {participants.find(p => p.user_id === user?.id)?.completed_tasks || 0} of {totalTasks} tasks completed
+            <ProgressBar progress={maxPoints > 0 ? currentUserPoints / maxPoints : 0} />
+            <Text style={[styles.progressText, { color: theme.subtext }]}>
+              {completedByCurrentUser} of {totalTasks} tasks completed
             </Text>
           </View>
         </View>
@@ -240,76 +343,21 @@ export default function Leaderboard() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {participants.map((participant) => (
-          <View
-            key={participant.id}
-            style={[
-              styles.participantCard,
-              participant.user_id === user?.id && styles.participantCardHighlight,
-              (participant.is_disqualified || participant.dropped_out_at) && styles.participantCardDisqualified,
-            ]}
-          >
-            <View style={styles.participantLeft}>
-              <View style={styles.rankContainer}>
-                {participant.rank === 1 && !participant.is_disqualified ? (
-                  <Crown color="#F59E0B" size={20} />
-                ) : (
-                  <Text style={styles.rankNumber}>{participant.rank}</Text>
-                )}
-              </View>
-
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {getInitials(participant.profiles.display_name)}
-                </Text>
-              </View>
-
-              <View style={styles.participantInfo}>
-                <Text
-                  style={[
-                    styles.participantName,
-                    (participant.is_disqualified || participant.dropped_out_at) && styles.participantNameDisqualified,
-                  ]}
-                >
-                  {participant.profiles.display_name}
-                  {participant.user_id === user?.id && ' (You)'}
-                </Text>
-                {participant.is_disqualified && (
-                  <View style={styles.disqualifiedBadge}>
-                    <Text style={styles.disqualifiedText}>Disqualified</Text>
-                  </View>
-                )}
-                {participant.dropped_out_at && (
-                  <View style={styles.droppedOutBadge}>
-                    <Text style={styles.droppedOutText}>Dropped Out</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-
-            <View style={styles.participantRight}>
-              <Text
-                style={[
-                  styles.participantPoints,
-                  (participant.is_disqualified || participant.dropped_out_at) && styles.participantPointsDisqualified,
-                ]}
-              >
-                {participant.points} pts
-              </Text>
-              <View style={styles.miniProgressBar}>
-                <View
-                  style={[
-                    styles.miniProgressFill,
-                    {
-                      width: `${totalTasks > 0 ? (participant.completed_tasks / totalTasks) * 100 : 0}%`,
-                    },
-                    (participant.is_disqualified || participant.dropped_out_at) && styles.miniProgressFillDisqualified,
-                  ]}
-                />
-              </View>
-            </View>
-          </View>
-        ))}
+        {participants.map((participant) => {
+          const anim = rowAnimations[participant.user_id];
+          return (
+            <AnimatedParticipantRow
+              key={participant.id}
+              participant={participant}
+              isCurrentUser={participant.user_id === user?.id}
+              totalTasks={totalTasks}
+              theme={theme}
+              translateY={anim?.translateY}
+              rankScale={anim?.rankScale}
+              getInitials={getInitials}
+            />
+          );
+        })}
       </ScrollView>
     </View>
   );

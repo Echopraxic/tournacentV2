@@ -12,8 +12,11 @@ import {
 } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { plaidApi } from '@/lib/plaid';
 import { PlaidLink } from '@/components/PlaidLink';
+import { Card } from '@/components/ui/Card';
+import { ProgressBar } from '@/components/ui/ProgressBar';
 import {
   CreditCard,
   Building2,
@@ -53,6 +56,7 @@ interface ActiveChallenge {
 
 export default function Wallet() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [prizePoolStatus, setPrizePoolStatus] = useState<PrizePoolStatus | null>(null);
   const [connected, setConnected] = useState(false);
@@ -325,21 +329,21 @@ export default function Wallet() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Wallet</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Wallet</Text>
         </View>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={[styles.loadingText, { color: theme.subtext }]}>Loading...</Text>
         </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Wallet</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Wallet</Text>
       </View>
 
       {/* Plaid Link Modal */}
@@ -374,17 +378,17 @@ export default function Wallet() {
       >
         {/* Payment Method Section */}
         <View style={styles.connectionSection}>
-          <Text style={styles.sectionTitle}>Payment Method</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Payment Method</Text>
 
-          <View style={styles.connectionCard}>
+          <Card style={styles.connectionCard}>
             <View style={styles.connectionHeader}>
               <View style={styles.connectionInfo}>
-                <CreditCard color="#6B7280" size={24} />
-                <Text style={styles.connectionLabel}>
+                <CreditCard color={theme.subtext} size={24} />
+                <Text style={[styles.connectionLabel, { color: theme.text }]}>
                   {connected ? 'Connected' : 'Not Connected'}
                 </Text>
               </View>
-              {connected && <CheckCircle color="#10B981" size={24} />}
+              {connected && <CheckCircle color={theme.primary} size={24} />}
             </View>
 
             {!connected && (
@@ -430,27 +434,27 @@ export default function Wallet() {
                 </TouchableOpacity>
               </View>
             )}
-          </View>
+          </Card>
         </View>
 
         {/* Plaid Bank Connection Section */}
         <View style={styles.plaidSection}>
-          <Text style={styles.sectionTitle}>Bank Account (Plaid)</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Bank Account (Plaid)</Text>
 
-          <View style={styles.plaidCard}>
+          <Card style={styles.plaidCard}>
             <View style={styles.plaidHeader}>
               <View style={styles.plaidInfo}>
-                <Building2 color={plaidLinked ? '#10B981' : '#6B7280'} size={24} />
+                <Building2 color={plaidLinked ? theme.primary : theme.subtext} size={24} />
                 <View style={styles.plaidTextGroup}>
-                  <Text style={styles.plaidLabel}>
+                  <Text style={[styles.plaidLabel, { color: theme.text }]}>
                     {plaidLinked ? 'Bank Connected' : 'No Bank Linked'}
                   </Text>
                   {institutionName && (
-                    <Text style={styles.institutionName}>{institutionName}</Text>
+                    <Text style={[styles.institutionName, { color: theme.primary }]}>{institutionName}</Text>
                   )}
                 </View>
               </View>
-              {plaidLinked && <CheckCircle color="#10B981" size={24} />}
+              {plaidLinked && <CheckCircle color={theme.primary} size={24} />}
             </View>
 
             {!plaidLinked && (
@@ -471,21 +475,21 @@ export default function Wallet() {
             {plaidLinked ? (
               <>
                 {lastSyncedAt && (
-                  <Text style={styles.lastSyncedText}>
+                  <Text style={[styles.lastSyncedText, { color: theme.subtext }]}>
                     Last synced {formatLastSynced(lastSyncedAt)}
                   </Text>
                 )}
                 <TouchableOpacity
-                  style={[styles.syncButton, syncOnCooldown && styles.syncButtonDisabled]}
+                  style={[styles.syncButton, { borderColor: theme.primary, backgroundColor: theme.background }, syncOnCooldown && styles.syncButtonDisabled]}
                   onPress={handleSyncTransactions}
                   disabled={syncingTransactions || syncOnCooldown}
                 >
                   {syncingTransactions ? (
-                    <ActivityIndicator size="small" color="#10B981" />
+                    <ActivityIndicator size="small" color={theme.primary} />
                   ) : (
-                    <RefreshCw size={16} color={syncOnCooldown ? '#9CA3AF' : '#10B981'} />
+                    <RefreshCw size={16} color={syncOnCooldown ? theme.subtext : theme.primary} />
                   )}
-                  <Text style={[styles.syncButtonText, syncOnCooldown && styles.syncButtonTextDisabled]}>
+                  <Text style={[styles.syncButtonText, { color: theme.primary }, syncOnCooldown && styles.syncButtonTextDisabled]}>
                     {syncingTransactions
                       ? 'Syncing...'
                       : syncOnCooldown
@@ -496,7 +500,7 @@ export default function Wallet() {
               </>
             ) : (
               <TouchableOpacity
-                style={styles.connectButton}
+                style={[styles.connectButton, { backgroundColor: theme.primary }]}
                 onPress={handleConnectBank}
                 disabled={linkTokenLoading}
               >
@@ -510,31 +514,40 @@ export default function Wallet() {
                 </Text>
               </TouchableOpacity>
             )}
-          </View>
+          </Card>
         </View>
 
         {/* Prize Pool Section */}
         {prizePoolStatus && (
           <View style={styles.prizePoolSection}>
-            <Text style={styles.sectionTitle}>Current Prize Pool</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Current Prize Pool</Text>
 
-            <View style={styles.prizePoolCard}>
+            <Card style={styles.prizePoolCard}>
               <View style={styles.prizePoolHeader}>
-                <WalletIcon color="#10B981" size={32} />
-                <Text style={styles.prizePoolAmount}>${prizePoolStatus.total_pool}</Text>
+                <WalletIcon color={theme.primary} size={32} />
+                <Text style={[styles.prizePoolAmount, { color: theme.primary }]}>${prizePoolStatus.total_pool}</Text>
               </View>
 
               <View style={styles.prizePoolStats}>
                 <View style={styles.prizePoolStat}>
-                  <Text style={styles.prizePoolStatValue}>{prizePoolStatus.paid_count}</Text>
-                  <Text style={styles.prizePoolStatLabel}>Paid</Text>
+                  <Text style={[styles.prizePoolStatValue, { color: theme.text }]}>{prizePoolStatus.paid_count}</Text>
+                  <Text style={[styles.prizePoolStatLabel, { color: theme.subtext }]}>Paid</Text>
                 </View>
                 <View style={styles.divider} />
                 <View style={styles.prizePoolStat}>
-                  <Text style={styles.prizePoolStatValue}>{prizePoolStatus.pending_count}</Text>
-                  <Text style={styles.prizePoolStatLabel}>Pending</Text>
+                  <Text style={[styles.prizePoolStatValue, { color: theme.text }]}>{prizePoolStatus.pending_count}</Text>
+                  <Text style={[styles.prizePoolStatLabel, { color: theme.subtext }]}>Pending</Text>
                 </View>
               </View>
+
+              <ProgressBar
+                progress={
+                  prizePoolStatus.paid_count + prizePoolStatus.pending_count > 0
+                    ? prizePoolStatus.paid_count / (prizePoolStatus.paid_count + prizePoolStatus.pending_count)
+                    : 0
+                }
+                height={6}
+              />
 
               {prizePoolStatus.pending_count > 0 && (
                 <View style={styles.nudgeBox}>
@@ -545,32 +558,32 @@ export default function Wallet() {
                   </Text>
                 </View>
               )}
-            </View>
+            </Card>
           </View>
         )}
 
         {/* Transaction History Section */}
         <View style={styles.transactionsSection}>
-          <Text style={styles.sectionTitle}>Transaction History</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Transaction History</Text>
 
           {transactions.length === 0 ? (
-            <View style={styles.emptyTransactions}>
-              <Text style={styles.emptyText}>No transactions yet</Text>
-            </View>
+            <Card style={styles.emptyTransactions}>
+              <Text style={[styles.emptyText, { color: theme.subtext }]}>No transactions yet</Text>
+            </Card>
           ) : (
             <View style={styles.transactionsList}>
               {transactions.map((transaction) => (
-                <View key={transaction.id} style={styles.transactionCard}>
+                <Card key={transaction.id} style={styles.transactionCard}>
                   <View style={styles.transactionLeft}>
                     {getStatusIcon(transaction.status)}
                     <View style={styles.transactionInfo}>
-                      <Text style={styles.transactionType}>
+                      <Text style={[styles.transactionType, { color: theme.text }]}>
                         {getTransactionTypeLabel(transaction.transaction_type)}
                       </Text>
-                      <Text style={styles.transactionChallenge}>
+                      <Text style={[styles.transactionChallenge, { color: theme.subtext }]}>
                         {transaction.challenges.name}
                       </Text>
-                      <Text style={styles.transactionDate}>
+                      <Text style={[styles.transactionDate, { color: theme.subtext }]}>
                         {formatDate(transaction.created_at)}
                       </Text>
                       {transaction.status === 'denied' && transaction.denial_reason && (
@@ -582,8 +595,8 @@ export default function Wallet() {
                     <Text
                       style={[
                         styles.transactionAmount,
-                        transaction.transaction_type === 'payout' &&
-                          styles.transactionAmountPositive,
+                        { color: theme.text },
+                        transaction.transaction_type === 'payout' && { color: theme.primary },
                       ]}
                     >
                       {transaction.transaction_type === 'payout' ? '+' : '-'}$
@@ -605,7 +618,7 @@ export default function Wallet() {
                       </Text>
                     </View>
                   </View>
-                </View>
+                </Card>
               ))}
             </View>
           )}
@@ -618,10 +631,8 @@ export default function Wallet() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
   },
   header: {
-    backgroundColor: '#FFFFFF',
     paddingTop: 60,
     paddingBottom: 16,
     paddingHorizontal: 24,
@@ -631,7 +642,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#111827',
   },
   scrollView: {
     flex: 1,
@@ -647,7 +657,6 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: '#6B7280',
   },
   // Modal
   modalContainer: {
@@ -682,18 +691,9 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
   },
   connectionCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
     gap: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
   connectionHeader: {
     flexDirection: 'row',
@@ -708,7 +708,6 @@ const styles = StyleSheet.create({
   connectionLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
   },
   explainerBox: {
     backgroundColor: '#F0F9FF',
@@ -796,15 +795,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   plaidCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
     gap: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
   plaidHeader: {
     flexDirection: 'row',
@@ -823,11 +814,9 @@ const styles = StyleSheet.create({
   plaidLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
   },
   institutionName: {
     fontSize: 13,
-    color: '#10B981',
     fontWeight: '500',
   },
   plaidExplainerBox: {
@@ -898,15 +887,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   prizePoolCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
     gap: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
   prizePoolHeader: {
     flexDirection: 'row',
@@ -919,7 +900,6 @@ const styles = StyleSheet.create({
   prizePoolAmount: {
     fontSize: 36,
     fontWeight: '700',
-    color: '#10B981',
   },
   prizePoolStats: {
     flexDirection: 'row',
@@ -933,11 +913,9 @@ const styles = StyleSheet.create({
   prizePoolStatValue: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#111827',
   },
   prizePoolStatLabel: {
     fontSize: 14,
-    color: '#6B7280',
   },
   divider: {
     width: 1,
@@ -962,27 +940,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   emptyTransactions: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
     padding: 40,
     alignItems: 'center',
   },
   emptyText: {
     fontSize: 16,
-    color: '#6B7280',
   },
   transactionCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
   },
   transactionLeft: {
     flexDirection: 'row',
@@ -996,15 +963,12 @@ const styles = StyleSheet.create({
   transactionType: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
   },
   transactionChallenge: {
     fontSize: 14,
-    color: '#6B7280',
   },
   transactionDate: {
     fontSize: 12,
-    color: '#9CA3AF',
   },
   denialReason: {
     fontSize: 12,
@@ -1018,10 +982,6 @@ const styles = StyleSheet.create({
   transactionAmount: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
-  },
-  transactionAmountPositive: {
-    color: '#10B981',
   },
   statusBadge: {
     paddingHorizontal: 8,

@@ -12,9 +12,12 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { PRESET_CHALLENGES, PresetChallenge } from '@/lib/presets';
-import { ChevronRight, Clock, DollarSign, Users, Share2 } from 'lucide-react-native';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { ChevronRight, Clock, DollarSign, Users } from 'lucide-react-native';
 
 type ModalStep = 'choose_type' | 'group_info' | 'group_sharing';
 
@@ -24,6 +27,7 @@ const INVITE_BASE_URL = 'https://tournacent.app/join';
 
 export default function BrowseScreen() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const router = useRouter();
   const [selectedPreset, setSelectedPreset] = useState<PresetChallenge | null>(null);
   const [step, setStep] = useState<ModalStep | null>(null);
@@ -211,43 +215,43 @@ export default function BrowseScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Browse Challenges</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Browse Challenges</Text>
         <TouchableOpacity onPress={() => { setShowCodeEntry(true); setCodeError(null); }}>
-          <Text style={styles.enterCodeButton}>Enter Code</Text>
+          <Text style={[styles.enterCodeButton, { color: theme.primary }]}>Enter Code</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
         {PRESET_CHALLENGES.map((preset) => (
-          <TouchableOpacity
-            key={preset.id}
-            style={styles.challengeCard}
-            onPress={() => {
-              setSelectedPreset(preset);
-              setStep('choose_type');
-            }}
-          >
-            <View style={styles.cardHeader}>
-              <Text style={styles.challengeName}>{preset.name}</Text>
-              <ChevronRight color="#D1D5DB" size={24} />
-            </View>
-            <View style={styles.detailsRow}>
-              <View style={styles.detailItem}>
-                <Clock size={16} color="#6B7280" />
-                <Text style={styles.detailText}>{preset.duration_days} days</Text>
+          <Card key={preset.id} style={styles.challengeCard}>
+            <TouchableOpacity
+              onPress={() => {
+                setSelectedPreset(preset);
+                setStep('choose_type');
+              }}
+            >
+              <View style={styles.cardHeader}>
+                <Text style={[styles.challengeName, { color: theme.text }]}>{preset.name}</Text>
+                <ChevronRight color={theme.subtext} size={24} />
               </View>
-              <View style={styles.detailItem}>
-                <DollarSign size={16} color="#6B7280" />
-                <Text style={styles.detailText}>${preset.buy_in_amount.toFixed(2)} buy-in</Text>
+              <View style={styles.detailsRow}>
+                <View style={styles.detailItem}>
+                  <Clock size={16} color={theme.subtext} />
+                  <Text style={[styles.detailText, { color: theme.subtext }]}>{preset.duration_days} days</Text>
+                </View>
+                <View style={styles.detailItem}>
+                  <DollarSign size={16} color={theme.subtext} />
+                  <Text style={[styles.detailText, { color: theme.subtext }]}>${preset.buy_in_amount.toFixed(2)} buy-in</Text>
+                </View>
+                <View style={styles.detailItem}>
+                  <Users size={16} color={theme.subtext} />
+                  <Text style={[styles.detailText, { color: theme.subtext }]}>Solo or Group</Text>
+                </View>
               </View>
-              <View style={styles.detailItem}>
-                <Users size={16} color="#6B7280" />
-                <Text style={styles.detailText}>Solo or Group</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </Card>
         ))}
       </ScrollView>
 
@@ -258,34 +262,33 @@ export default function BrowseScreen() {
             style={styles.overlayBackdrop}
             onPress={() => { setShowCodeEntry(false); setCodeInput(''); setCodeError(null); }}
           />
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Join with Invite Code</Text>
-            <Text style={styles.sheetSubtitle}>Enter a TC-XXXX code shared by a friend</Text>
+          <View style={[styles.sheet, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.sheetTitle, { color: theme.text }]}>Join with Invite Code</Text>
+            <Text style={[styles.sheetSubtitle, { color: theme.subtext }]}>Enter a TC-XXXX code shared by a friend</Text>
             <TextInput
-              style={styles.codeInputField}
+              style={[styles.codeInputField, { color: theme.text, backgroundColor: theme.background, borderColor: theme.primary }]}
               value={codeInput}
               onChangeText={(t) => setCodeInput(t.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
               placeholder="TC-XXXX"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.subtext}
               autoCapitalize="characters"
               autoCorrect={false}
               maxLength={7}
             />
             {codeError && <Text style={styles.errorText}>{codeError}</Text>}
-            <TouchableOpacity
-              style={[styles.primaryButton, (lookingUp || codeInput.length < 7) && styles.buttonDisabled]}
+            <Button
+              variant="primary"
               onPress={handleJoinWithCode}
               disabled={lookingUp || codeInput.length < 7}
+              loading={lookingUp}
             >
-              <Text style={styles.primaryButtonText}>
-                {lookingUp ? 'Looking up…' : 'Find Challenge'}
-              </Text>
-            </TouchableOpacity>
+              Find Challenge
+            </Button>
             <TouchableOpacity
               onPress={() => { setShowCodeEntry(false); setCodeInput(''); setCodeError(null); }}
               style={styles.cancelLink}
             >
-              <Text style={styles.cancelLinkText}>Cancel</Text>
+              <Text style={[styles.cancelLinkText, { color: theme.subtext }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -295,41 +298,41 @@ export default function BrowseScreen() {
       {selectedPreset && step && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.overlayBackdrop} onPress={closeModal} />
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { backgroundColor: theme.surface }]}>
 
             {/* Step 1 — Choose type */}
             {step === 'choose_type' && (
               <>
-                <Text style={styles.sheetTitle}>{selectedPreset.name}</Text>
-                <Text style={styles.sheetSubtitle}>How do you want to play?</Text>
+                <Text style={[styles.sheetTitle, { color: theme.text }]}>{selectedPreset.name}</Text>
+                <Text style={[styles.sheetSubtitle, { color: theme.subtext }]}>How do you want to play?</Text>
 
                 <TouchableOpacity
-                  style={styles.typeCard}
+                  style={[styles.typeCard, { borderColor: theme.subtext }]}
                   onPress={handleJoinSolo}
                   disabled={joining}
                 >
-                  <Text style={styles.typeCardTitle}>Solo</Text>
-                  <Text style={styles.typeCardDesc}>
+                  <Text style={[styles.typeCardTitle, { color: theme.text }]}>Solo</Text>
+                  <Text style={[styles.typeCardDesc, { color: theme.subtext }]}>
                     Start immediately. Track your own progress — no waiting, no group needed.
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.typeCard, styles.typeCardGroup]}
+                  style={[styles.typeCard, styles.typeCardGroup, { backgroundColor: theme.primary, borderColor: theme.primary }]}
                   onPress={() => setStep('group_info')}
                   disabled={joining}
                 >
                   <Text style={[styles.typeCardTitle, { color: '#FFFFFF' }]}>Group</Text>
-                  <Text style={[styles.typeCardDesc, { color: '#D1FAE5' }]}>
+                  <Text style={[styles.typeCardDesc, { color: 'rgba(255,255,255,0.8)' }]}>
                     Compete with friends. Pool your buy-ins and the winner takes all.
                   </Text>
                 </TouchableOpacity>
 
-                {joining && <ActivityIndicator color="#10B981" style={{ marginTop: 8 }} />}
+                {joining && <ActivityIndicator color={theme.primary} style={{ marginTop: 8 }} />}
                 {joinError && <Text style={styles.errorText}>{joinError}</Text>}
 
                 <TouchableOpacity onPress={closeModal} style={styles.cancelLink}>
-                  <Text style={styles.cancelLinkText}>Cancel</Text>
+                  <Text style={[styles.cancelLinkText, { color: theme.subtext }]}>Cancel</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -337,7 +340,7 @@ export default function BrowseScreen() {
             {/* Step 2 — Group info */}
             {step === 'group_info' && (
               <>
-                <Text style={styles.sheetTitle}>Group Challenge Rules</Text>
+                <Text style={[styles.sheetTitle, { color: theme.text }]}>Group Challenge Rules</Text>
 
                 <View style={styles.rulesList}>
                   {[
@@ -349,25 +352,24 @@ export default function BrowseScreen() {
                   ].map(([icon, text], i) => (
                     <View key={i} style={styles.ruleRow}>
                       <Text style={styles.ruleBullet}>{icon}</Text>
-                      <Text style={styles.ruleText}>{text}</Text>
+                      <Text style={[styles.ruleText, { color: theme.text }]}>{text}</Text>
                     </View>
                   ))}
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.primaryButton, joining && styles.buttonDisabled]}
+                <Button
+                  variant="primary"
                   onPress={handleCreateGroup}
                   disabled={joining}
+                  loading={joining}
                 >
-                  <Text style={styles.primaryButtonText}>
-                    {joining ? 'Creating challenge…' : 'Create & Get Invite Code'}
-                  </Text>
-                </TouchableOpacity>
+                  Create & Get Invite Code
+                </Button>
 
                 {joinError && <Text style={styles.errorText}>{joinError}</Text>}
 
                 <TouchableOpacity onPress={() => setStep('choose_type')} style={styles.cancelLink}>
-                  <Text style={styles.cancelLinkText}>Back</Text>
+                  <Text style={[styles.cancelLinkText, { color: theme.subtext }]}>Back</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -375,29 +377,28 @@ export default function BrowseScreen() {
             {/* Step 3 — Share */}
             {step === 'group_sharing' && (
               <>
-                <Text style={styles.sheetTitle}>Invite Your Friends</Text>
-                <Text style={styles.sheetSubtitle}>
+                <Text style={[styles.sheetTitle, { color: theme.text }]}>Invite Your Friends</Text>
+                <Text style={[styles.sheetSubtitle, { color: theme.subtext }]}>
                   Share this code — 3 players needed to start the challenge
                 </Text>
 
-                <View style={styles.codeBox}>
-                  <Text style={styles.codeText}>{inviteCode}</Text>
+                <View style={[styles.codeBox, { backgroundColor: theme.background, borderColor: theme.primary }]}>
+                  <Text style={[styles.codeText, { color: theme.text }]}>{inviteCode}</Text>
                 </View>
 
-                <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-                  <Share2 size={20} color="#FFFFFF" />
-                  <Text style={styles.shareButtonText}>Share via SMS, Snapchat, Instagram, Email…</Text>
-                </TouchableOpacity>
+                <Button variant="primary" onPress={handleShare}>
+                  Share via SMS, Snapchat, Instagram, Email…
+                </Button>
 
-                <TouchableOpacity
-                  style={styles.primaryButton}
+                <Button
+                  variant="secondary"
                   onPress={() => {
                     closeModal();
                     router.replace('/(tabs)');
                   }}
                 >
-                  <Text style={styles.primaryButtonText}>Done</Text>
-                </TouchableOpacity>
+                  Done
+                </Button>
               </>
             )}
           </View>
@@ -408,9 +409,8 @@ export default function BrowseScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  container: { flex: 1 },
   header: {
-    backgroundColor: '#FFFFFF',
     paddingTop: 60,
     paddingBottom: 16,
     paddingHorizontal: 20,
@@ -420,23 +420,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: { fontSize: 28, fontWeight: '700', color: '#111827' },
-  enterCodeButton: { fontSize: 15, color: '#10B981', fontWeight: '600' },
+  headerTitle: { fontSize: 28, fontWeight: '700' },
+  enterCodeButton: { fontSize: 15, fontWeight: '600' },
   scrollView: { flex: 1 },
   content: { padding: 16, gap: 12, paddingBottom: 32 },
   challengeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
     gap: 12,
   },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  challengeName: { fontSize: 16, fontWeight: '700', color: '#111827', flex: 1 },
+  challengeName: { fontSize: 16, fontWeight: '700', flex: 1 },
   detailsRow: { flexDirection: 'row', gap: 16 },
   detailItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  detailText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
+  detailText: { fontSize: 12, fontWeight: '500' },
 
   // ── Modals ─────────────────────────────────────────────────────────────────
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end' },
@@ -445,66 +440,45 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   sheet: {
-    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     paddingBottom: 40,
     gap: 16,
   },
-  sheetTitle: { fontSize: 22, fontWeight: '700', color: '#111827' },
-  sheetSubtitle: { fontSize: 14, color: '#6B7280', lineHeight: 20, marginTop: -8 },
+  sheetTitle: { fontSize: 22, fontWeight: '700' },
+  sheetSubtitle: { fontSize: 14, lineHeight: 20, marginTop: -8 },
 
-  typeCard: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 14, padding: 16, gap: 6 },
-  typeCardGroup: { backgroundColor: '#10B981', borderColor: '#10B981' },
-  typeCardTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  typeCardDesc: { fontSize: 13, color: '#6B7280', lineHeight: 18 },
+  typeCard: { borderWidth: 1, borderRadius: 14, padding: 16, gap: 6 },
+  typeCardGroup: {},
+  typeCardTitle: { fontSize: 18, fontWeight: '700' },
+  typeCardDesc: { fontSize: 13, lineHeight: 18 },
 
   rulesList: { gap: 12 },
   ruleRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   ruleBullet: { fontSize: 18, width: 28 },
-  ruleText: { flex: 1, fontSize: 13, color: '#374151', lineHeight: 20 },
+  ruleText: { flex: 1, fontSize: 13, lineHeight: 20 },
 
   codeBox: {
-    backgroundColor: '#F3F4F6',
     borderRadius: 12,
     paddingVertical: 20,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#10B981',
   },
-  codeText: { fontSize: 32, fontWeight: '800', color: '#111827', letterSpacing: 4 },
+  codeText: { fontSize: 32, fontWeight: '800', letterSpacing: 4 },
 
   codeInputField: {
     borderWidth: 2,
-    borderColor: '#10B981',
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 12,
     fontSize: 26,
     fontWeight: '800',
-    color: '#111827',
     textAlign: 'center',
     letterSpacing: 6,
-    backgroundColor: '#F3F4F6',
   },
-
-  shareButton: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  shareButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-
-  primaryButton: { backgroundColor: '#111827', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  buttonDisabled: { opacity: 0.5 },
 
   cancelLink: { alignItems: 'center', paddingVertical: 4 },
-  cancelLinkText: { fontSize: 14, color: '#6B7280' },
+  cancelLinkText: { fontSize: 14 },
   errorText: { fontSize: 13, color: '#EF4444', textAlign: 'center', paddingHorizontal: 8 },
 });

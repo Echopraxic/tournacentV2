@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,18 @@ import {
   Modal,
   Image,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { useFocusEffect } from 'expo-router';
+import { GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { useSwipeAction } from '@/hooks/animations/useSwipeAction';
+import { useScalePress } from '@/hooks/animations/useScalePress';
+import { ProgressBar } from '@/components/ui/ProgressBar';
 import { verifyTaskCompletion } from '@/lib/task-verification';
-import { CheckCircle2, Circle, AlertTriangle, Upload, ImageIcon } from 'lucide-react-native';
+import { CheckCircle2, Circle, AlertTriangle, Upload, ImageIcon, Check } from 'lucide-react-native';
 
 interface Task {
   id: string;
@@ -38,8 +45,146 @@ const NO_SPEND_CATEGORIES = [
   { id: 'RECREATION', label: 'Recreation' },
 ] as const;
 
+/**
+ * Individual swipeable task card.
+ * Each card needs its own useSwipeAction instance, so it must be a
+ * separate component (hooks cannot be called inside a .map()).
+ *
+ * Swipe right past 40% of screen width to trigger onSwipeComplete,
+ * which opens the completion modal (or directly completes self-report tasks).
+ * Completed and disabled tasks are not swipeable.
+ */
+function SwipeableTaskCard({
+  task,
+  onPress,
+  getTaskTypeColor,
+}: {
+  task: Task;
+  onPress: (task: Task) => void;
+  getTaskTypeColor: (type: string) => string;
+}) {
+  const { theme } = useTheme();
+  const { gesture, animatedStyle, underlayStyle } = useSwipeAction({
+    onAction: () => onPress(task),
+    disabled: task.completed,
+  });
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <View style={styles.swipeContainer}>
+        {/* Green underlay revealed on swipe */}
+        <Animated.View style={[styles.swipeUnderlay, underlayStyle]}>
+          <Check color="#FFFFFF" size={24} />
+        </Animated.View>
+
+        <Animated.View
+          style={[
+            styles.taskCard,
+            { backgroundColor: task.completed ? '#F0FDF4' : theme.surface },
+            task.completed && styles.taskCardCompleted,
+            animatedStyle,
+          ]}
+        >
+          <TouchableOpacity
+            onPress={() => onPress(task)}
+            disabled={task.completed}
+            activeOpacity={0.85}
+          >
+            <View style={styles.taskContent}>
+              <View style={styles.taskLeft}>
+                {task.completed ? (
+                  <CheckCircle2 color="#10B981" size={24} />
+                ) : (
+                  <Circle color="#D1D5DB" size={24} />
+                )}
+                <View style={styles.taskInfo}>
+                  <View style={styles.taskTitleRow}>
+                    <Text
+                      style={[
+                        styles.taskTitle,
+                        { color: task.completed ? '#059669' : theme.text },
+                      ]}
+                    >
+                      {task.title}
+                    </Text>
+                    {task.is_mandatory && (
+                      <AlertTriangle color={theme.danger} size={16} />
+                    )}
+                  </View>
+                  <Text style={[styles.taskDescription, { color: theme.subtext }]}>
+                    {task.description}
+                  </Text>
+                  <View
+                    style={[
+                      styles.taskTypeBadge,
+                      { backgroundColor: `${getTaskTypeColor(task.task_type)}20` },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.taskTypeText,
+                        { color: getTaskTypeColor(task.task_type) },
+                      ]}
+                    >
+                      {task.task_type}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.pointsBadge,
+                  task.completed ? styles.pointsBadgeCompleted : { backgroundColor: '#DBEAFE' },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.pointsText,
+                    { color: task.completed ? '#059669' : '#1D4ED8' },
+                  ]}
+                >
+                  {task.points}
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
+    </GestureDetector>
+  );
+}
+
+/** Animated confirm button for modals — springs on press. */
+function ConfirmButton({
+  title,
+  onPress,
+  disabled = false,
+  style,
+}: {
+  title: string;
+  onPress: () => void;
+  disabled?: boolean;
+  style?: object;
+}) {
+  const { animatedStyle, onPressIn, onPressOut } = useScalePress();
+  return (
+    <Animated.View style={[animatedStyle, styles.modalButtonConfirm, disabled && styles.modalButtonDisabled, style]}>
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        disabled={disabled}
+        style={styles.confirmInner}
+      >
+        <Text style={styles.modalButtonConfirmText}>{title}</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 export default function Tasks() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [totalPoints, setTotalPoints] = useState(0);
@@ -131,6 +276,12 @@ export default function Tasks() {
   useEffect(() => {
     fetchTasks();
   }, [user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user) fetchTasks();
+    }, [user])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -397,29 +548,25 @@ export default function Tasks() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tasks</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Tasks</Text>
       </View>
 
-      <View style={styles.statsHeader}>
+      <View style={[styles.statsHeader, { backgroundColor: theme.surface }]}>
         <View style={styles.pointsRow}>
           <View>
-            <Text style={styles.pointsLabel}>Total Points</Text>
-            <Text style={styles.pointsValue}>{totalPoints}</Text>
+            <Text style={[styles.pointsLabel, { color: theme.subtext }]}>Total Points</Text>
+            <Text style={[styles.pointsValue, { color: theme.text }]}>{totalPoints}</Text>
           </View>
           <View style={styles.maxPoints}>
-            <Text style={styles.maxPointsText}>out of {maxPoints}</Text>
+            <Text style={[styles.maxPointsText, { color: theme.subtext }]}>out of {maxPoints}</Text>
           </View>
         </View>
 
         <View style={styles.progressSection}>
-          <View style={styles.progressBar}>
-            <View
-              style={[styles.progressFill, { width: `${progressPercentage}%` }]}
-            />
-          </View>
-          <Text style={styles.progressText}>
+          <ProgressBar progress={maxPoints > 0 ? totalPoints / maxPoints : 0} />
+          <Text style={[styles.progressText, { color: theme.subtext }]}>
             {completedCount} of {totalTasksCount} tasks completed
           </Text>
         </View>
@@ -439,73 +586,12 @@ export default function Tasks() {
         }
       >
         {tasks.map((task) => (
-          <TouchableOpacity
+          <SwipeableTaskCard
             key={task.id}
-            style={[
-              styles.taskCard,
-              task.completed && styles.taskCardCompleted,
-            ]}
-            onPress={() => handleTaskPress(task)}
-            disabled={task.completed}
-          >
-            <View style={styles.taskContent}>
-              <View style={styles.taskLeft}>
-                {task.completed ? (
-                  <CheckCircle2 color="#10B981" size={24} />
-                ) : (
-                  <Circle color="#D1D5DB" size={24} />
-                )}
-                <View style={styles.taskInfo}>
-                  <View style={styles.taskTitleRow}>
-                    <Text
-                      style={[
-                        styles.taskTitle,
-                        task.completed && styles.taskTitleCompleted,
-                      ]}
-                    >
-                      {task.title}
-                    </Text>
-                    {task.is_mandatory && (
-                      <AlertTriangle color="#EF4444" size={16} />
-                    )}
-                  </View>
-                  <Text style={styles.taskDescription}>
-                    {task.description}
-                  </Text>
-                  <View
-                    style={[
-                      styles.taskTypeBadge,
-                      { backgroundColor: `${getTaskTypeColor(task.task_type)}20` },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.taskTypeText,
-                        { color: getTaskTypeColor(task.task_type) },
-                      ]}
-                    >
-                      {task.task_type}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-              <View
-                style={[
-                  styles.pointsBadge,
-                  task.completed && styles.pointsBadgeCompleted,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.pointsText,
-                    task.completed && styles.pointsTextCompleted,
-                  ]}
-                >
-                  {task.points}
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
+            task={task}
+            onPress={handleTaskPress}
+            getTaskTypeColor={getTaskTypeColor}
+          />
         ))}
       </ScrollView>
 
@@ -561,18 +647,12 @@ export default function Tasks() {
               >
                 <Text style={styles.modalButtonCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.modalButtonConfirm,
-                  (selectedCategories.length !== 3 || uploading) && styles.modalButtonDisabled,
-                ]}
+              <ConfirmButton
+                title={uploading ? 'Saving…' : `Confirm (+${selectedTask?.points ?? 0} pts)`}
                 onPress={handleDeclareCategories}
                 disabled={selectedCategories.length !== 3 || uploading}
-              >
-                <Text style={styles.modalButtonConfirmText}>
-                  {uploading ? 'Saving…' : `Confirm (+${selectedTask?.points ?? 0} pts)`}
-                </Text>
-              </TouchableOpacity>
+                style={styles.flex1}
+              />
             </View>
           </View>
         </View>
@@ -617,16 +697,12 @@ export default function Tasks() {
                   >
                     <Text style={styles.modalButtonCancelText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButtonConfirm, (!evidenceUri || uploading) && styles.modalButtonDisabled]}
+                  <ConfirmButton
+                    title={uploading ? 'Uploading…' : `Submit (+${selectedTask?.points} pts)`}
                     onPress={handleCompleteTask}
                     disabled={!evidenceUri || uploading}
-                  >
-                    <Upload size={16} color="#FFFFFF" />
-                    <Text style={styles.modalButtonConfirmText}>
-                      {uploading ? 'Uploading…' : `Submit (+${selectedTask?.points} pts)`}
-                    </Text>
-                  </TouchableOpacity>
+                    style={styles.flex1}
+                  />
                 </View>
               </>
             ) : (
@@ -642,12 +718,11 @@ export default function Tasks() {
                   >
                     <Text style={styles.modalButtonCancelText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.modalButtonConfirm}
+                  <ConfirmButton
+                    title="Complete"
                     onPress={handleCompleteTask}
-                  >
-                    <Text style={styles.modalButtonConfirmText}>Complete</Text>
-                  </TouchableOpacity>
+                    style={styles.flex1}
+                  />
                 </View>
               </>
             )}
@@ -771,8 +846,21 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
   },
+  swipeContainer: {
+    position: 'relative',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 0,
+  },
+  swipeUnderlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#00A86B',
+    borderRadius: 12,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingRight: 24,
+  },
   taskCard: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 16,
     shadowColor: '#000',
@@ -781,6 +869,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  flex1: { flex: 1 },
+  confirmInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   taskCardCompleted: {
     backgroundColor: '#F0FDF4',
     borderWidth: 1,

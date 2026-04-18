@@ -1,18 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   RefreshControl,
   Share,
   Platform,
+  TouchableOpacity,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Trophy, Target, Clock, Users, Share2 } from 'lucide-react-native';
+import { useTheme } from '@/contexts/ThemeContext';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { tokens } from '@/constants/tokens';
+import { Trophy, Target, Clock, Users, Share2, Sun, Moon } from 'lucide-react-native';
 
 const APP_STORE_URL = 'https://apps.apple.com/app/tournacent/id000000000'; // placeholder
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.tournacent'; // placeholder
@@ -46,6 +56,7 @@ interface Task {
 
 export default function Home() {
   const { user } = useAuth();
+  const { theme, mode, setMode } = useTheme();
   const router = useRouter();
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [participant, setParticipant] = useState<Participant | null>(null);
@@ -60,11 +71,36 @@ export default function Home() {
   const [pendingPlayerCount, setPendingPlayerCount] = useState(0);
   const [payingIn, setPayingIn] = useState(false);
 
+  // Animated prize pool counter
+  const prizeDisplayValue = useSharedValue(0);
+  const prizeAnimStyle = useAnimatedStyle(() => ({})); // drives re-render for text
+  const [displayedPrize, setDisplayedPrize] = useState(0);
+
+  const animatePrizeTo = (target: number) => {
+    prizeDisplayValue.value = withTiming(target, {
+      duration: 800,
+      easing: Easing.out(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        // sync display value on completion — runs on JS thread via callback
+      }
+    });
+    // Approximate the displayed value by stepping — simple and effective
+    let start = displayedPrize;
+    const steps = 20;
+    const step = (target - start) / steps;
+    let i = 0;
+    const interval = setInterval(() => {
+      i++;
+      setDisplayedPrize(Math.round(start + step * i));
+      if (i >= steps) clearInterval(interval);
+    }, 800 / steps);
+  };
+
   const fetchData = async () => {
     if (!user) return;
 
     try {
-      // Fetch all active (non-dropped-out) participations
       const { data: allParticipations } = await supabase
         .from('challenge_participants')
         .select('challenge_id, points, rank, payment_status, challenges(*)')
@@ -86,10 +122,11 @@ export default function Home() {
           payment_status: participantData.payment_status,
         });
 
+        animatePrizeTo(challengeData.prize_pool ?? 0);
+
         const endDate = new Date(challengeData.end_date || Date.now());
         const today = new Date();
-        const diffTime = endDate.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         setDaysRemaining(diffDays > 0 ? diffDays : 0);
 
         const { count } = await supabase
@@ -126,30 +163,25 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [user]);
+  useEffect(() => { fetchData(); }, [user]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchData();
-  };
+  useFocusEffect(
+    useCallback(() => {
+      if (user) fetchData();
+    }, [user])
+  );
+
+  const onRefresh = () => { setRefreshing(true); fetchData(); };
 
   const handleCompleteTask = async () => {
     if (!highestTask || !challenge || !user) return;
-
     try {
       await supabase.from('task_completions').insert({
         task_id: highestTask.id,
         user_id: user.id,
         challenge_id: challenge.id,
       });
-
-      await supabase.rpc('increment', {
-        row_id: user.id,
-        x: highestTask.points,
-      });
-
+      await supabase.rpc('increment', { row_id: user.id, x: highestTask.points });
       setFeedback({ message: `Task completed! +${highestTask.points} points`, isError: false });
       setTimeout(() => setFeedback(null), 3000);
       fetchData();
@@ -173,12 +205,10 @@ export default function Home() {
         .update({ payment_status: 'paid' })
         .eq('challenge_id', challenge.id)
         .eq('user_id', user.id);
-
       await supabase
         .from('challenges')
         .update({ prize_pool: challenge.prize_pool + challenge.buy_in_amount })
         .eq('id', challenge.id);
-
       fetchData();
     } catch (error: any) {
       setFeedback({ message: error.message || 'Buy-in failed', isError: true });
@@ -215,28 +245,13 @@ export default function Home() {
     if (!challenge || !user) return;
     setDroppingOut(true);
     try {
-      // Count other active participants (excluding current user)
-      const { count } = await supabase
-        .from('challenge_participants')
-        .select('*', { count: 'exact', head: true })
-        .eq('challenge_id', challenge.id)
-        .is('dropped_out_at', null)
-        .neq('user_id', user.id);
+      const { data, error } = await supabase.rpc('drop_out_of_challenge', {
+        p_challenge_id: challenge.id,
+      });
 
-      if (count === 0) {
-        // Last active player — delete the entire challenge via RPC
-        const { error } = await supabase.rpc('delete_empty_challenge', {
-          p_challenge_id: challenge.id,
-        });
-        if (error) throw error;
-      } else {
-        // Other players remain — soft-delete this participant only
-        const { error } = await supabase
-          .from('challenge_participants')
-          .update({ dropped_out_at: new Date().toISOString() })
-          .eq('challenge_id', challenge.id)
-          .eq('user_id', user.id);
-        if (error) throw error;
+      if (error) throw error;
+      if (!data?.success) {
+        throw new Error(data?.error || 'Failed to drop out');
       }
 
       setShowDropWarning(false);
@@ -244,7 +259,7 @@ export default function Home() {
       setParticipant(null);
     } catch (error: any) {
       setFeedback({ message: error.message || 'Failed to drop out', isError: true });
-      setTimeout(() => setFeedback(null), 3000);
+      setTimeout(() => setFeedback(null), 8000);
       setShowDropWarning(false);
     } finally {
       setDroppingOut(false);
@@ -262,14 +277,23 @@ export default function Home() {
     return rank <= 3 ? ordinals[rank] : `${rank}th`;
   };
 
+  const ThemeToggle = () => (
+    <TouchableOpacity onPress={() => setMode(mode === 'light' ? 'dark' : 'light')} hitSlop={12}>
+      {mode === 'light'
+        ? <Moon color={theme.subtext} size={22} />
+        : <Sun color={theme.subtext} size={22} />}
+    </TouchableOpacity>
+  );
+
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Tournacent</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Tournacent</Text>
+          <ThemeToggle />
         </View>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={[styles.loadingText, { color: theme.subtext }]}>Loading...</Text>
         </View>
       </View>
     );
@@ -277,113 +301,107 @@ export default function Home() {
 
   if (!challenge) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Tournacent</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Tournacent</Text>
+          <ThemeToggle />
         </View>
         <View style={styles.emptyContainer}>
-          <Trophy color="#D1D5DB" size={64} />
-          <Text style={styles.emptyTitle}>No Active Challenge</Text>
-          <Text style={styles.emptyText}>
+          <Trophy color={theme.subtext} size={64} />
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>No Active Challenge</Text>
+          <Text style={[styles.emptyText, { color: theme.subtext }]}>
             Join or create a challenge to get started
           </Text>
-          <TouchableOpacity
-            style={styles.browseButton}
+          <Button
+            title="Browse Challenges"
+            variant="primary"
             onPress={() => router.push('/(tabs)/browse')}
-          >
-            <Text style={styles.browseButtonText}>Browse Challenges</Text>
-          </TouchableOpacity>
+            style={styles.browseButton}
+          />
         </View>
       </View>
     );
   }
 
-  // ── Pending group challenge: waiting for players ──────────────────────────
+  // ── Pending group challenge ───────────────────────────────────────────────
   if (challenge.status === 'pending') {
     const hoursLeft = hoursUntil(challenge.pending_expires_at);
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Tournacent</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Tournacent</Text>
+          <ThemeToggle />
         </View>
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.content}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          <View style={styles.pendingCard}>
+          <Card>
             <View style={styles.pendingIconRow}>
-              <Users color="#10B981" size={32} />
+              <Users color={theme.primary} size={32} />
             </View>
-            <Text style={styles.pendingTitle}>Waiting for Players</Text>
-            <Text style={styles.pendingName}>{challenge.name}</Text>
+            <Text style={[styles.pendingTitle, { color: theme.text }]}>Waiting for Players</Text>
+            <Text style={[styles.pendingName, { color: theme.subtext }]}>{challenge.name}</Text>
 
             <View style={styles.pendingStats}>
               <View style={styles.pendingStat}>
-                <Text style={styles.pendingStatValue}>{pendingPlayerCount}</Text>
-                <Text style={styles.pendingStatLabel}>joined</Text>
+                <Text style={[styles.pendingStatValue, { color: theme.text }]}>{pendingPlayerCount}</Text>
+                <Text style={[styles.pendingStatLabel, { color: theme.subtext }]}>joined</Text>
               </View>
-              <Text style={styles.pendingStatSep}>/</Text>
+              <Text style={[styles.pendingStatSep, { color: theme.subtext }]}>/</Text>
               <View style={styles.pendingStat}>
-                <Text style={styles.pendingStatValue}>3</Text>
-                <Text style={styles.pendingStatLabel}>needed</Text>
+                <Text style={[styles.pendingStatValue, { color: theme.text }]}>3</Text>
+                <Text style={[styles.pendingStatLabel, { color: theme.subtext }]}>needed</Text>
               </View>
             </View>
 
             {challenge.invite_code && (
-              <View style={styles.codeBox}>
-                <Text style={styles.codeLabel}>Invite Code</Text>
-                <Text style={styles.codeValue}>{challenge.invite_code}</Text>
+              <View style={[styles.codeBox, { borderColor: theme.primary }]}>
+                <Text style={[styles.codeLabel, { color: theme.subtext }]}>Invite Code</Text>
+                <Text style={[styles.codeValue, { color: theme.text }]}>{challenge.invite_code}</Text>
               </View>
             )}
 
-            <TouchableOpacity style={styles.shareBtn} onPress={handleShareAgain}>
-              <Share2 size={18} color="#FFFFFF" />
-              <Text style={styles.shareBtnText}>Share Invitation</Text>
-            </TouchableOpacity>
+            <Button
+              title="Share Invitation"
+              variant="primary"
+              onPress={handleShareAgain}
+              style={styles.fullWidth}
+            />
 
-            <Text style={styles.pendingExpiry}>
+            <Text style={[styles.pendingExpiry, { color: theme.subtext }]}>
               {hoursLeft > 0
                 ? `Challenge cancels in ${hoursLeft}h if 3 players don't join`
                 : 'Challenge has expired — not enough players joined'}
             </Text>
 
-            <TouchableOpacity
-              style={styles.dropOutButton}
+            <Button
+              title="Leave Challenge"
+              variant="danger"
               onPress={() => setShowDropWarning(true)}
-            >
-              <Text style={styles.dropOutButtonText}>Leave Challenge</Text>
-            </TouchableOpacity>
-          </View>
+              style={styles.fullWidth}
+            />
+          </Card>
 
           {showDropWarning && (
-            <View style={styles.warningCard}>
-              <Text style={styles.warningTitle}>Leave this challenge?</Text>
-              <Text style={styles.warningBody}>
+            <Card style={styles.warningCard}>
+              <Text style={[styles.warningTitle, { color: theme.danger }]}>Leave this challenge?</Text>
+              <Text style={[styles.warningBody, { color: theme.text }]}>
                 You'll be removed from the challenge. If it later activates without you, you won't participate.
               </Text>
               <View style={styles.warningActions}>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setShowDropWarning(false)}>
-                  <Text style={styles.cancelButtonText}>Stay</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.confirmDropButton}
-                  onPress={handleDropOut}
-                  disabled={droppingOut}
-                >
-                  <Text style={styles.confirmDropButtonText}>
-                    {droppingOut ? 'Leaving…' : 'Yes, Leave'}
-                  </Text>
-                </TouchableOpacity>
+                <Button title="Stay" variant="secondary" onPress={() => setShowDropWarning(false)} style={styles.flex1} />
+                <Button title={droppingOut ? 'Leaving…' : 'Yes, Leave'} variant="danger" onPress={handleDropOut} disabled={droppingOut} style={styles.flex1} />
               </View>
-            </View>
+            </Card>
           )}
         </ScrollView>
       </View>
     );
   }
 
-  // ── Active group challenge, buy-in still pending ──────────────────────────
+  // ── Buy-in pending ────────────────────────────────────────────────────────
   if (
     challenge.status === 'active' &&
     challenge.challenge_type === 'group' &&
@@ -391,548 +409,252 @@ export default function Home() {
   ) {
     const hoursLeft = hoursUntil(challenge.buyin_deadline);
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Tournacent</Text>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Tournacent</Text>
+          <ThemeToggle />
         </View>
         <View style={styles.emptyContainer}>
           <Text style={styles.buyinEmoji}>💸</Text>
-          <Text style={styles.emptyTitle}>Buy-In Required</Text>
-          <Text style={styles.buyinChallengeName}>{challenge.name}</Text>
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>Buy-In Required</Text>
+          <Text style={[styles.buyinChallengeName, { color: theme.text }]}>{challenge.name}</Text>
+          <Text style={[styles.emptyText, { color: theme.subtext }]}>
             Your challenge is live! Complete your buy-in to secure your spot.
           </Text>
-          <View style={styles.buyinDeadline}>
+          <View style={[styles.buyinDeadline, { backgroundColor: '#FEF3C7' }]}>
             <Clock size={16} color="#D97706" />
             <Text style={styles.buyinDeadlineText}>
-              {hoursLeft > 0
-                ? `${hoursLeft} hours left to pay`
-                : 'Buy-in window has closed'}
+              {hoursLeft > 0 ? `${hoursLeft} hours left to pay` : 'Buy-in window has closed'}
             </Text>
           </View>
-          <TouchableOpacity
-            style={[styles.buyinButton, (payingIn || hoursLeft === 0) && styles.buttonDisabled]}
+          <Button
+            title={payingIn ? 'Processing…' : `Confirm Buy-In — $${Number(challenge.buy_in_amount).toFixed(2)}`}
+            variant="primary"
             onPress={handleBuyIn}
             disabled={payingIn || hoursLeft === 0}
-          >
-            <Text style={styles.buyinButtonText}>
-              {payingIn
-                ? 'Processing…'
-                : `Confirm Buy-In — $${Number(challenge.buy_in_amount).toFixed(2)}`}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.dropOutButton}
+            style={styles.fullWidth}
+          />
+          <Button
+            title="Drop Out"
+            variant="danger"
             onPress={() => setShowDropWarning(true)}
-          >
-            <Text style={styles.dropOutButtonText}>Drop Out</Text>
-          </TouchableOpacity>
+            style={[styles.fullWidth, { marginTop: 8 }]}
+          />
           {showDropWarning && (
-            <View style={[styles.warningCard, { width: '100%', marginTop: 16 }]}>
-              <Text style={styles.warningTitle}>Are you sure?</Text>
-              <Text style={styles.warningBody}>
+            <Card style={[styles.warningCard, { marginTop: 16, width: '100%' }]}>
+              <Text style={[styles.warningTitle, { color: theme.danger }]}>Are you sure?</Text>
+              <Text style={[styles.warningBody, { color: theme.text }]}>
                 Dropping out is permanent. Your buy-in (if paid) stays in the pool.
               </Text>
               <View style={styles.warningActions}>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setShowDropWarning(false)}>
-                  <Text style={styles.cancelButtonText}>Stay In</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.confirmDropButton}
-                  onPress={handleDropOut}
-                  disabled={droppingOut}
-                >
-                  <Text style={styles.confirmDropButtonText}>
-                    {droppingOut ? 'Dropping out…' : 'Yes, Drop Out'}
-                  </Text>
-                </TouchableOpacity>
+                <Button title="Stay In" variant="secondary" onPress={() => setShowDropWarning(false)} style={styles.flex1} />
+                <Button title={droppingOut ? 'Dropping out…' : 'Yes, Drop Out'} variant="danger" onPress={handleDropOut} disabled={droppingOut} style={styles.flex1} />
               </View>
-            </View>
+            </Card>
           )}
         </View>
       </View>
     );
   }
 
+  // ── Active challenge ──────────────────────────────────────────────────────
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tournacent</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.surface }]}>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Tournacent</Text>
+        <ThemeToggle />
       </View>
 
       {feedback && (
-        <View style={[styles.feedbackBanner, feedback.isError ? styles.feedbackError : styles.feedbackSuccess]}>
-          <Text style={styles.feedbackText}>{feedback.message}</Text>
+        <View style={[
+          styles.feedbackBanner,
+          { backgroundColor: feedback.isError ? '#FEE2E2' : '#D1FAE5' },
+        ]}>
+          <Text style={[styles.feedbackText, { color: theme.text }]}>{feedback.message}</Text>
         </View>
       )}
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View style={styles.challengeCard}>
+        <Card>
           <View style={styles.challengeHeader}>
-            <Text style={styles.challengeName}>{challenge.name}</Text>
-            <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>ACTIVE</Text>
+            <Text style={[styles.challengeName, { color: theme.text }]}>{challenge.name}</Text>
+            <View style={[styles.statusBadge, { backgroundColor: '#D1FAE5' }]}>
+              <Text style={[styles.statusText, { color: '#059669' }]}>ACTIVE</Text>
             </View>
           </View>
 
           <View style={styles.prizeSection}>
-            <Text style={styles.prizeLabel}>Prize Pool</Text>
-            <Text style={styles.prizeAmount}>${challenge.prize_pool}</Text>
+            <Text style={[styles.prizeLabel, { color: theme.subtext }]}>Prize Pool</Text>
+            <Text style={[styles.prizeAmount, { color: theme.primary }]}>${displayedPrize}</Text>
           </View>
 
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Clock color="#6B7280" size={20} />
-              <Text style={styles.statValue}>{daysRemaining}</Text>
-              <Text style={styles.statLabel}>days left</Text>
+              <Clock color={theme.subtext} size={20} />
+              <Text style={[styles.statValue, { color: theme.text }]}>{daysRemaining}</Text>
+              <Text style={[styles.statLabel, { color: theme.subtext }]}>days left</Text>
             </View>
-
-            <View style={styles.divider} />
-
+            <View style={[styles.divider, { backgroundColor: '#E5E7EB' }]} />
             <View style={styles.statItem}>
-              <Trophy color="#6B7280" size={20} />
-              <Text style={styles.statValue}>{participantCount}</Text>
-              <Text style={styles.statLabel}>players</Text>
+              <Trophy color={theme.subtext} size={20} />
+              <Text style={[styles.statValue, { color: theme.text }]}>{participantCount}</Text>
+              <Text style={[styles.statLabel, { color: theme.subtext }]}>players</Text>
             </View>
-
-            <View style={styles.divider} />
-
+            <View style={[styles.divider, { backgroundColor: '#E5E7EB' }]} />
             <View style={styles.statItem}>
-              <Target color="#6B7280" size={20} />
-              <Text style={styles.statValue}>{participant?.points || 0}</Text>
-              <Text style={styles.statLabel}>points</Text>
+              <Target color={theme.subtext} size={20} />
+              <Text style={[styles.statValue, { color: theme.text }]}>{participant?.points || 0}</Text>
+              <Text style={[styles.statLabel, { color: theme.subtext }]}>points</Text>
             </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.dropOutButton}
+          <Button
+            title="Drop Out"
+            variant="danger"
             onPress={() => setShowDropWarning(true)}
-          >
-            <Text style={styles.dropOutButtonText}>Drop Out</Text>
-          </TouchableOpacity>
-        </View>
+            style={{ marginTop: tokens.spacing[3] }}
+          />
+        </Card>
 
         {showDropWarning && (
-          <View style={styles.warningCard}>
-            <Text style={styles.warningTitle}>Are you sure?</Text>
-            <Text style={styles.warningBody}>
-              Dropping out is permanent. Your buy-in will remain in the prize pool and go to the other players. You will not receive a refund.
+          <Card style={styles.warningCard}>
+            <Text style={[styles.warningTitle, { color: theme.danger }]}>Are you sure?</Text>
+            <Text style={[styles.warningBody, { color: theme.text }]}>
+              Dropping out is permanent. Your buy-in will remain in the prize pool. You will not receive a refund.
             </Text>
             <View style={styles.warningActions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowDropWarning(false)}
-              >
-                <Text style={styles.cancelButtonText}>Stay In</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.confirmDropButton}
-                onPress={handleDropOut}
-                disabled={droppingOut}
-              >
-                <Text style={styles.confirmDropButtonText}>
-                  {droppingOut ? 'Dropping out…' : 'Yes, Drop Out'}
-                </Text>
-              </TouchableOpacity>
+              <Button title="Stay In" variant="secondary" onPress={() => setShowDropWarning(false)} style={styles.flex1} />
+              <Button title={droppingOut ? 'Dropping out…' : 'Yes, Drop Out'} variant="danger" onPress={handleDropOut} disabled={droppingOut} style={styles.flex1} />
             </View>
-          </View>
+          </Card>
         )}
 
         {highestTask && (
-          <View style={styles.taskCard}>
+          <Card>
             <View style={styles.taskHeader}>
-              <Text style={styles.taskLabel}>Highest Value Task</Text>
-              <View style={styles.pointsBadge}>
-                <Text style={styles.pointsText}>{highestTask.points} pts</Text>
+              <Text style={[styles.taskLabel, { color: theme.subtext }]}>Highest Value Task</Text>
+              <View style={[styles.pointsBadge, { backgroundColor: '#DBEAFE' }]}>
+                <Text style={[styles.pointsText, { color: '#1D4ED8' }]}>{highestTask.points} pts</Text>
               </View>
             </View>
-            <Text style={styles.taskTitle}>{highestTask.title}</Text>
-            <TouchableOpacity
-              style={styles.completeButton}
+            <Text style={[styles.taskTitle, { color: theme.text }]}>{highestTask.title}</Text>
+            <Button
+              title="Complete Task"
+              variant="primary"
               onPress={handleCompleteTask}
-            >
-              <Text style={styles.completeButtonText}>Complete Task</Text>
-            </TouchableOpacity>
-          </View>
+              style={{ marginTop: tokens.spacing[3] }}
+            />
+          </Card>
         )}
 
-        <TouchableOpacity
+        <Animated.View
           style={[
             styles.rankBanner,
             { backgroundColor: getRankColor(participant?.rank || 1) },
           ]}
-          onPress={() => router.push('/(tabs)/leaderboard')}
         >
-          <Text style={styles.rankText}>
+          <Text
+            style={[styles.rankText, { color: theme.text }]}
+            onPress={() => router.push('/(tabs)/leaderboard')}
+          >
             You're in {getRankText(participant?.rank || 1)} place
           </Text>
-        </TouchableOpacity>
+        </Animated.View>
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
+  container: { flex: 1 },
   header: {
-    backgroundColor: '#FFFFFF',
     paddingTop: 60,
     paddingBottom: 16,
     paddingHorizontal: 24,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  feedbackBanner: {
-    padding: 12,
-    alignItems: 'center',
-  },
-  feedbackSuccess: {
-    backgroundColor: '#D1FAE5',
-  },
-  feedbackError: {
-    backgroundColor: '#FEE2E2',
-  },
-  feedbackText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  content: {
-    padding: 16,
-    gap: 16,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  emptyTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  browseButton: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  browseButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  challengeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  challengeHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
-  },
-  challengeName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    flex: 1,
-  },
-  statusBadge: {
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#059669',
-  },
-  prizeSection: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 20,
-  },
-  prizeLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 8,
-  },
-  prizeAmount: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: '#10B981',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-  },
-  statItem: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 4,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  divider: {
-    width: 1,
-    height: 40,
-    backgroundColor: '#E5E7EB',
-  },
-  taskCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-    height: 180,
     justifyContent: 'space-between',
   },
-  taskHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  taskLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
-  pointsBadge: {
-    backgroundColor: '#DBEAFE',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  pointsText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1D4ED8',
-  },
-  taskTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-    flex: 1,
-  },
-  completeButton: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-  },
-  completeButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  rankBanner: {
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 180,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  rankText: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  dropOutButton: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  dropOutButtonText: {
-    color: '#EF4444',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  warningCard: {
-    backgroundColor: '#FFF7ED',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
-    gap: 12,
-  },
-  warningTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#B91C1C',
-  },
-  warningBody: {
-    fontSize: 14,
-    color: '#7C2D12',
-    lineHeight: 20,
-  },
-  warningActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 4,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  confirmDropButton: {
-    flex: 1,
-    backgroundColor: '#EF4444',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  confirmDropButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-
-  // ── Pending group state ───────────────────────────────────────────────────
-  pendingCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    gap: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  pendingIconRow: {
-    backgroundColor: '#D1FAE5',
-    borderRadius: 50,
-    padding: 16,
-  },
-  pendingTitle: { fontSize: 22, fontWeight: '700', color: '#111827' },
-  pendingName: { fontSize: 15, color: '#6B7280', textAlign: 'center' },
-  pendingStats: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerTitle: { fontSize: 28, fontWeight: '700' },
+  feedbackBanner: { padding: 12, alignItems: 'center' },
+  feedbackText: { fontSize: 14, fontWeight: '600' },
+  scrollView: { flex: 1 },
+  content: { padding: 16, gap: 16 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { fontSize: 16 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
+  emptyTitle: { fontSize: 24, fontWeight: '700', marginTop: 24, marginBottom: 8 },
+  emptyText: { fontSize: 16, textAlign: 'center', marginBottom: 24 },
+  browseButton: { width: '100%' },
+  fullWidth: { width: '100%' },
+  flex1: { flex: 1 },
+  // Pending state
+  pendingIconRow: { alignSelf: 'center', backgroundColor: '#D1FAE5', borderRadius: 50, padding: 16, marginBottom: 8 },
+  pendingTitle: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  pendingName: { fontSize: 15, textAlign: 'center' },
+  pendingStats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginVertical: 8 },
   pendingStat: { alignItems: 'center' },
-  pendingStatValue: { fontSize: 36, fontWeight: '800', color: '#111827' },
-  pendingStatLabel: { fontSize: 12, color: '#6B7280' },
-  pendingStatSep: { fontSize: 28, color: '#D1D5DB', fontWeight: '300' },
+  pendingStatValue: { fontSize: 36, fontWeight: '800' },
+  pendingStatLabel: { fontSize: 12 },
+  pendingStatSep: { fontSize: 28, fontWeight: '300' },
   codeBox: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
+    borderRadius: tokens.radius.sm,
     paddingVertical: 14,
     paddingHorizontal: 24,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#10B981',
+    backgroundColor: '#F3F4F6',
     width: '100%',
+    marginVertical: 4,
   },
-  codeLabel: { fontSize: 11, color: '#6B7280', fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
-  codeValue: { fontSize: 28, fontWeight: '800', color: '#111827', letterSpacing: 3 },
-  shareBtn: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-    justifyContent: 'center',
-  },
-  shareBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  pendingExpiry: { fontSize: 12, color: '#9CA3AF', textAlign: 'center' },
-
-  // ── Buy-in state ──────────────────────────────────────────────────────────
+  codeLabel: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
+  codeValue: { fontSize: 28, fontWeight: '800', letterSpacing: 3 },
+  pendingExpiry: { fontSize: 12, textAlign: 'center' },
+  // Buy-in state
   buyinEmoji: { fontSize: 56, marginBottom: 8 },
-  buyinChallengeName: { fontSize: 18, fontWeight: '700', color: '#111827', textAlign: 'center', marginTop: -8 },
+  buyinChallengeName: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginTop: -8 },
   buyinDeadline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginBottom: 8,
   },
   buyinDeadlineText: { fontSize: 13, color: '#D97706', fontWeight: '600' },
-  buyinButton: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    width: '100%',
-    marginTop: 8,
+  // Active challenge
+  challengeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  challengeName: { fontSize: 20, fontWeight: '700', flex: 1 },
+  statusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  statusText: { fontSize: 12, fontWeight: '600' },
+  prizeSection: {
+    alignItems: 'center', paddingVertical: 20,
+    borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#E5E7EB', marginBottom: 20,
   },
-  buyinButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  buttonDisabled: { opacity: 0.5 },
+  prizeLabel: { fontSize: 14, marginBottom: 8 },
+  prizeAmount: { fontSize: 48, fontWeight: '700' },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  statItem: { alignItems: 'center', flex: 1, gap: 4 },
+  statValue: { fontSize: 24, fontWeight: '700' },
+  statLabel: { fontSize: 12 },
+  divider: { width: 1, height: 40 },
+  taskHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  taskLabel: { fontSize: 14, fontWeight: '600' },
+  pointsBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  pointsText: { fontSize: 12, fontWeight: '600' },
+  taskTitle: { fontSize: 18, fontWeight: '600', flex: 1 },
+  rankBanner: {
+    borderRadius: tokens.radius.md, padding: 24, alignItems: 'center',
+    justifyContent: 'center', height: 100,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+  },
+  rankText: { fontSize: 24, fontWeight: '700' },
+  // Warning card
+  warningCard: { borderWidth: 1, borderColor: '#FCA5A5' },
+  warningTitle: { fontSize: 18, fontWeight: '700' },
+  warningBody: { fontSize: 14, lineHeight: 20 },
+  warningActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
 });
