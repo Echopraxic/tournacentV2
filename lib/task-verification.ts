@@ -15,41 +15,26 @@ export const verifyTaskCompletion = async (
   isMandatory: boolean
 ): Promise<VerificationResult> => {
   try {
-    // Get challenge details
     const { data: challenge } = await supabase
       .from('challenges')
       .select('*')
       .eq('id', challengeId)
       .maybeSingle();
 
-    if (!challenge) {
-      return { success: false, message: 'Challenge not found' };
-    }
+    if (!challenge) return { success: false, message: 'Challenge not found' };
 
-    // Get task details
     const { data: task } = await supabase
       .from('tasks')
       .select('*')
       .eq('id', taskId)
       .maybeSingle();
 
-    if (!task) {
-      return { success: false, message: 'Task not found' };
-    }
+    if (!task) return { success: false, message: 'Task not found' };
 
-    if (taskType === 'savings') {
-      return await verifySavingsTask(userId, challengeId, task, challenge);
-    }
+    if (taskType === 'savings') return verifySavingsTask(userId, challengeId, task, challenge);
+    if (taskType === 'no_spend') return verifyNoSpendTask(userId, challengeId, task, challenge);
+    if (taskType === 'tracking') return verifyTrackingTask(userId, challengeId, task, challenge);
 
-    if (taskType === 'no_spend') {
-      return await verifyNoSpendTask(userId, challengeId, task, challenge);
-    }
-
-    if (taskType === 'tracking') {
-      return await verifyTrackingTask(userId, challengeId, task, challenge);
-    }
-
-    // Default: manual tasks are accepted as-is
     return { success: true, message: 'Task completed successfully' };
   } catch (error: any) {
     return { success: false, message: error.message };
@@ -57,14 +42,17 @@ export const verifyTaskCompletion = async (
 };
 
 /**
- * Verifies a savings deposit milestone using real Plaid bank transaction data.
+ * Verifies savings tasks. Behavior splits on whether the task title contains a
+ * dollar amount:
  *
- * In Plaid's convention:
- *   - Negative amount = credit (money coming IN to the account, i.e. a deposit)
- *   - Positive amount = debit (money going OUT, i.e. a withdrawal)
+ * - Title has "$N"  →  deposit milestone: verify net deposits ≥ N and no
+ *                      withdrawals have occurred since challenge start.
+ * - No dollar amount →  passthrough (connect-account, goal-setting, automate
+ *                      tasks): return success immediately so the user can
+ *                      self-report without a Plaid gate.
  *
- * A user is disqualified if any withdrawal (positive amount) occurred since the
- * challenge start date. The net deposit is the sum of all credits minus all debits.
+ * Plaid sign convention: negative amount = credit (deposit), positive = debit
+ * (withdrawal). Only withdrawals above $15 are flagged to ignore small fees.
  */
 const verifySavingsTask = async (
   userId: string,
@@ -72,7 +60,17 @@ const verifySavingsTask = async (
   task: any,
   challenge: any
 ): Promise<VerificationResult> => {
-  // Check if user has a linked bank account
+  // Extract the first dollar figure from the task title, e.g. "$250" → 250
+  const dollarMatch = task.title.match(/\$(\d[\d,]*)/);
+  const requiredAmount = dollarMatch
+    ? parseFloat(dollarMatch[1].replace(',', ''))
+    : null;
+
+  // No dollar threshold → connect/goal/automate task; self-report, no Plaid needed
+  if (requiredAmount === null) {
+    return { success: true, message: 'Task completed successfully.' };
+  }
+
   const { data: plaidItem } = await supabase
     .from('plaid_items')
     .select('id')
@@ -88,22 +86,21 @@ const verifySavingsTask = async (
 
   const challengeStart = challenge.start_date;
 
-  // Check for any withdrawals (positive Plaid amounts) since challenge start
+  // Withdrawals (positive Plaid amounts > $15) disqualify the user
   const { data: withdrawals } = await supabase
     .from('bank_transactions')
     .select('amount, date, name')
     .eq('user_id', userId)
     .gte('date', challengeStart)
-    .gt('amount', 15) // positive = debit/withdrawal in Plaid; only flag debits > $15
+    .gt('amount', 15)
     .eq('pending', false);
 
   if (withdrawals && withdrawals.length > 0) {
-    // Mark user as disqualified for withdrawal violation
     await supabase
       .from('challenge_participants')
       .update({
         is_disqualified: true,
-        disqualification_reason: 'Withdrawal detected during Emergency Fund challenge',
+        disqualification_reason: 'Withdrawal detected during savings challenge',
       })
       .eq('user_id', userId)
       .eq('challenge_id', challengeId);
@@ -115,33 +112,23 @@ const verifySavingsTask = async (
     };
   }
 
-  // Calculate net deposits (negative amounts = credits in Plaid)
+  // Net deposits = sum of all credits (negative Plaid amounts) since challenge start
   const { data: deposits } = await supabase
     .from('bank_transactions')
     .select('amount')
     .eq('user_id', userId)
     .gte('date', challengeStart)
-    .lt('amount', 0) // negative = credit/deposit in Plaid
+    .lt('amount', 0)
     .eq('pending', false);
 
   const totalDeposited = deposits
     ? deposits.reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
     : 0;
 
-  // Check if user meets the task's deposit threshold (stored in task.points metadata or description)
-  // Map point values to required deposit amounts per QUICK_START.md
-  const depositThresholds: Record<number, number> = {
-    20: 25,   // Deposit $25+ (20 pts)
-    40: 100,  // Deposit $100+ total (40 pts)
-    60: 250,  // Deposit $250+ total (60 pts)
-  };
-
-  const requiredAmount = depositThresholds[task.points];
-
-  if (requiredAmount !== undefined && totalDeposited < requiredAmount) {
+  if (totalDeposited < requiredAmount) {
     return {
       success: false,
-      message: `Deposit milestone not met. You've deposited $${totalDeposited.toFixed(2)} of the required $${requiredAmount}.`,
+      message: `Deposit milestone not met. You've deposited $${totalDeposited.toFixed(2)} of the required $${requiredAmount.toFixed(2)}.`,
     };
   }
 
@@ -152,20 +139,17 @@ const verifySavingsTask = async (
 };
 
 /**
- * Verifies a no-spend streak by checking Plaid transactions only in the
- * categories the user declared they would avoid.
+ * Verifies a no-spend streak.
  *
- * Flow:
- *  1. Confirm the user has a linked bank account.
- *  2. Load their declared categories from user_no_spend_categories.
- *  3. Confirm enough time has elapsed for the streak period.
- *  4. Scan bank_transactions for any settled debit whose stored category
- *     matches one of the declared categories during the streak window.
- *  5. Clean/disqualify if violated; award points if clean.
+ * Required days are read from the task title (e.g. "21-Day Spending Freeze"
+ * → 21), falling back to 7 if no match is found.
  *
- * Plaid primary category values stored in bank_transactions.category[0]:
- *   FOOD_AND_DRINK, ENTERTAINMENT, SHOPPING, TRAVEL, PERSONAL_CARE,
- *   TRANSPORTATION, GENERAL_MERCHANDISE, RECREATION, etc.
+ * If the user has declared categories (user_no_spend_categories), only
+ * transactions in those categories are checked. If no categories are declared
+ * (challenges that have no declare step), ALL spending above $1 is treated as
+ * a violation — matching the intent of a blanket spending freeze.
+ *
+ * Plaid sign convention: positive amount = debit (spending).
  */
 const verifyNoSpendTask = async (
   userId: string,
@@ -186,30 +170,16 @@ const verifyNoSpendTask = async (
     };
   }
 
-  // Load declared categories — must exist before streak tasks can be verified
-  const { data: declaredCategories } = await supabase
-    .from('user_no_spend_categories')
-    .select('plaid_category')
-    .eq('user_id', userId)
-    .eq('challenge_id', challengeId);
-
-  if (!declaredCategories || declaredCategories.length === 0) {
-    return {
-      success: false,
-      message: 'Complete the "Declare 3 Spending Categories" task before claiming streak tasks.',
-    };
-  }
-
-  const categoryList = declaredCategories.map((c: any) => c.plaid_category as string);
+  // Read required streak length from title: "7-Day", "14-Day", "21-Day", etc.
+  const dayMatch = task.title.match(/(\d+)-Day/i);
+  const requiredDays = dayMatch ? parseInt(dayMatch[1], 10) : 7;
 
   const challengeStart = challenge.start_date.split('T')[0];
-
-  // 40 pts = 7-day streak, 60 pts = 14-day streak
-  const requiredDays = task.points >= 60 ? 14 : 7;
   const streakEnd = new Date(
     new Date(challengeStart).getTime() + requiredDays * 24 * 60 * 60 * 1000
-  ).toISOString().split('T')[0];
-
+  )
+    .toISOString()
+    .split('T')[0];
   const today = new Date().toISOString().split('T')[0];
 
   if (today < streakEnd) {
@@ -222,6 +192,16 @@ const verifyNoSpendTask = async (
     };
   }
 
+  // Load any declared categories for this user + challenge
+  const { data: declaredCategories } = await supabase
+    .from('user_no_spend_categories')
+    .select('plaid_category')
+    .eq('user_id', userId)
+    .eq('challenge_id', challengeId);
+
+  const categoryList = declaredCategories?.map((c: any) => c.plaid_category as string) ?? [];
+  const filterByCategory = categoryList.length > 0;
+
   // Fetch settled debits during the streak window
   const { data: debits } = await supabase
     .from('bank_transactions')
@@ -229,32 +209,42 @@ const verifyNoSpendTask = async (
     .eq('user_id', userId)
     .gte('date', challengeStart)
     .lte('date', streakEnd)
-    .gt('amount', 0) // positive = debit/spending in Plaid
+    .gt('amount', 0)
     .eq('pending', false);
 
-  // Check if any debit falls in a declared category
   const violatingTx = debits?.find((tx: any) => {
-    const primary = Array.isArray(tx.category) ? tx.category[0] : null;
-    return primary && categoryList.includes(primary);
+    if (filterByCategory) {
+      const primary = Array.isArray(tx.category) ? tx.category[0] : null;
+      return primary && categoryList.includes(primary);
+    }
+    // No declared categories: flag any spending above $1 (blanket freeze)
+    return tx.amount > 1;
   });
 
   if (violatingTx) {
     return {
       success: false,
-      message: `Spending detected in a declared no-spend category (${violatingTx.name} on ${violatingTx.date}). Streak broken.`,
+      message: filterByCategory
+        ? `Spending detected in a declared no-spend category (${violatingTx.name} on ${violatingTx.date}). Streak broken.`
+        : `Spending detected during your freeze period (${violatingTx.name} on ${violatingTx.date}). Streak broken.`,
       streakBroken: true,
     };
   }
 
   return {
     success: true,
-    message: `${requiredDays}-day no-spend streak verified — no spending in your declared categories.`,
+    message: `${requiredDays}-day no-spend streak verified — no qualifying spending detected.`,
   };
 };
 
 /**
- * Verifies a daily tracking task by counting days with logged bank activity
- * and ensuring the user has been tracking throughout the challenge period.
+ * Verifies a daily expense tracking task by checking that the user has at
+ * least N consecutive days with bank activity via their linked Plaid account,
+ * where N is extracted from the task title (e.g. "7-Day Expense Tracking" → 7).
+ *
+ * A "tracked day" is any date with at least one settled transaction. The check
+ * finds the longest consecutive-day run in the transaction history and requires
+ * it to be ≥ N.
  */
 const verifyTrackingTask = async (
   userId: string,
@@ -275,11 +265,26 @@ const verifyTrackingTask = async (
     };
   }
 
-  const challengeStart = challenge.start_date;
+  // Extract required days from task title: "7-Day", "21 Days", "Track Every Purchase for 21 Days", etc.
+  const dayMatch = task.title.match(/(\d+)/);
+  const requiredDays = dayMatch ? parseInt(dayMatch[1], 10) : 7;
+
+  const challengeStart = challenge.start_date.split('T')[0];
   const today = new Date().toISOString().split('T')[0];
 
-  // Count distinct days with transactions (any amount) as evidence of active tracking
-  const { data: txDays } = await supabase
+  // Enough calendar time must have elapsed before the streak can be claimed
+  const daysSinceStart = Math.floor(
+    (Date.now() - new Date(challengeStart).getTime()) / (1000 * 60 * 60 * 24)
+  );
+  if (daysSinceStart < requiredDays) {
+    const daysLeft = requiredDays - daysSinceStart;
+    return {
+      success: false,
+      message: `${requiredDays}-day tracking streak not complete yet. ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining.`,
+    };
+  }
+
+  const { data: txs } = await supabase
     .from('bank_transactions')
     .select('date')
     .eq('user_id', userId)
@@ -287,26 +292,58 @@ const verifyTrackingTask = async (
     .lte('date', today)
     .eq('pending', false);
 
-  const uniqueDays = new Set(txDays?.map((tx) => tx.date) ?? []).size;
+  const uniqueDates = [...new Set(txs?.map((tx: any) => tx.date as string) ?? [])].sort();
+
+  if (uniqueDates.length < requiredDays) {
+    return {
+      success: false,
+      message: `Tracking incomplete. Activity found on ${uniqueDates.length} of the required ${requiredDays} days.`,
+    };
+  }
+
+  // Find the longest run of consecutive calendar dates
+  let longestStreak = 1;
+  let currentStreak = 1;
+  for (let i = 1; i < uniqueDates.length; i++) {
+    const diffMs =
+      new Date(uniqueDates[i]).getTime() - new Date(uniqueDates[i - 1]).getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 1) {
+      currentStreak++;
+      longestStreak = Math.max(longestStreak, currentStreak);
+    } else {
+      currentStreak = 1;
+    }
+  }
+
+  if (longestStreak < requiredDays) {
+    return {
+      success: false,
+      message: `Consecutive tracking streak not met. Longest unbroken streak: ${longestStreak} day${longestStreak !== 1 ? 's' : ''} (${requiredDays} required). A gap in activity was detected.`,
+    };
+  }
 
   return {
     success: true,
-    message: `Spending tracked across ${uniqueDays} day${uniqueDays !== 1 ? 's' : ''} via linked bank account.`,
+    message: `${requiredDays}-day expense tracking streak verified via linked bank account.`,
   };
 };
 
+/**
+ * Resets no-spend streak completions and deducts points when a streak is
+ * broken. Intended to be called from a Supabase edge function or webhook
+ * that detects a disqualifying transaction in real time.
+ */
 export const handleStreakBreak = async (
   userId: string,
   challengeId: string,
   spendingCategory: string
 ): Promise<void> => {
-  // Reset no-spend streak task completions and deduct points
   const { data: tasks } = await supabase
     .from('tasks')
     .select('id, points')
     .eq('challenge_id', challengeId)
-    .eq('task_type', 'no_spend')
-    .in('points', [40, 60]); // 7-day and 14-day streak tasks
+    .eq('task_type', 'no_spend');
 
   if (tasks) {
     for (const task of tasks) {
@@ -335,6 +372,11 @@ export const handleStreakBreak = async (
   }
 };
 
+/**
+ * Checks whether a user has failed any mandatory tasks at challenge end and
+ * disqualifies them if so. Intended to be called from a scheduled Supabase
+ * function when a challenge's end_date is reached.
+ */
 export const checkAutomaticDisqualification = async (
   userId: string,
   challengeId: string
@@ -347,7 +389,7 @@ export const checkAutomaticDisqualification = async (
 
   if (!mandatoryTasks) return false;
 
-  const mandatoryTaskIds = mandatoryTasks.map((t) => t.id);
+  const mandatoryTaskIds = mandatoryTasks.map((t: any) => t.id);
 
   const { data: completions } = await supabase
     .from('task_completions')
@@ -355,15 +397,15 @@ export const checkAutomaticDisqualification = async (
     .eq('user_id', userId)
     .in('task_id', mandatoryTaskIds);
 
-  const completedIds = new Set(completions?.map((c) => c.task_id) ?? []);
-  const failedMandatory = mandatoryTaskIds.filter((id) => !completedIds.has(id));
+  const completedIds = new Set(completions?.map((c: any) => c.task_id) ?? []);
+  const anyFailed = mandatoryTaskIds.some((id: string) => !completedIds.has(id));
 
-  if (failedMandatory.length > 0) {
+  if (anyFailed) {
     await supabase
       .from('challenge_participants')
       .update({
         is_disqualified: true,
-        disqualification_reason: 'Failed mandatory task',
+        disqualification_reason: 'Failed to complete all mandatory tasks',
       })
       .eq('user_id', userId)
       .eq('challenge_id', challengeId);
@@ -375,9 +417,10 @@ export const checkAutomaticDisqualification = async (
 };
 
 /**
- * Monitors a user's linked bank account for withdrawal violations.
- * Should be called periodically (e.g., via a scheduled Supabase function)
- * for active Emergency Fund Sprint participants.
+ * Scans a user's linked bank account for withdrawal violations and
+ * disqualifies them if any are found. Intended to be called on a recurring
+ * schedule (e.g. nightly pg_cron or Supabase scheduled function) for active
+ * savings challenge participants.
  */
 export const monitorForWithdrawals = async (
   userId: string,
@@ -389,7 +432,7 @@ export const monitorForWithdrawals = async (
     .select('id')
     .eq('user_id', userId)
     .gte('date', challengeStartDate)
-    .gt('amount', 15) // positive = debit/withdrawal in Plaid; only flag debits > $15
+    .gt('amount', 15)
     .eq('pending', false)
     .limit(1);
 
@@ -403,7 +446,7 @@ export const monitorForWithdrawals = async (
       .eq('user_id', userId)
       .eq('challenge_id', challengeId);
 
-    return true; // disqualified
+    return true;
   }
 
   return false;
