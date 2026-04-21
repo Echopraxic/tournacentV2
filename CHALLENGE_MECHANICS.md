@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tournacent features four preset challenges that users can join. Each challenge has specific completion requirements, anti-gaming rules, and verification methods to ensure real behavioral change and prevent fraud.
+Tournacent features five preset challenges that users can join. Each challenge has specific completion requirements, anti-gaming rules, and verification methods to ensure real behavioral change and prevent fraud.
 
 ---
 
@@ -290,6 +290,84 @@ Each milestone must be completed in order—no skipping tiers.
 
 ---
 
+## Challenge 5: Bill Negotiation Blitz
+
+**Level:** Intermediate
+**Duration:** 30 Days
+**Buy-In:** $15
+**Target:** Users paying above-market rates on recurring bills
+**Goal:** Negotiate 2+ bills, document $100+ in annual savings
+
+### Mandatory Tasks
+
+1. **Complete Bill Audit Worksheet** (20 pts)
+   - List all recurring bills with provider name, service type, current monthly cost, and contract end date (5+ bills required)
+   - Verification: Form submission reviewed
+   - Completion: User submits form and marks complete
+
+2. **Research Market Rates** (25 pts)
+   - Find competitor pricing for 3+ services and upload screenshots with URLs
+   - Verification: User uploads screenshots of competitor pricing pages
+   - Completion: User uploads proof and marks complete
+
+3. **Script Your First Call** (15 pts)
+   - Write a 60-second negotiation opener and save it in the app
+   - Verification: Text entry timestamped in system
+   - Completion: User submits script and marks complete
+
+4. **Make First Negotiation Call** (35 pts)
+   - Call a provider and attempt a rate reduction
+   - Verification: User uploads screenshot of call log with date, provider name, and outcome
+   - Anti-Gaming Rule: Screenshot EXIF date must fall within challenge window
+   - Completion: User uploads proof and marks complete
+
+5. **Secure First Win** (50 pts)
+   - Get any rate reduction or credit applied to an account
+   - Verification: User uploads screenshot of confirmation email or new rate showing reduction
+   - Anti-Gaming Rule: New rate must be lower than audit baseline for same provider
+   - Completion: User uploads proof and marks complete
+
+6. **Negotiate Second Bill** (40 pts)
+   - Call a different provider category and document the outcome
+   - Verification: User uploads call log and outcome documentation
+   - Anti-Gaming Rule: Must be a different provider category from the first negotiation
+   - Completion: User uploads proof and marks complete
+
+7. **Document Total Annual Savings** (45 pts)
+   - Calculate and submit 12-month savings across all confirmed rate reductions
+   - Verification: Auto-calculated from submitted wins: (old rate − new rate) × 12 months per win
+   - Completion: User submits savings summary and marks complete
+
+### Optional Tasks
+
+1. **Negotiate Third Bill** (45 pts)
+   - Call an additional provider and upload confirmation of savings
+   - Verification: Photo upload — call log + win confirmation
+   - Completion: User uploads proof and marks complete
+
+2. **Threaten to Cancel (Retention Dept)** (30 pts)
+   - Escalate a call to the cancellation/retention team and document the result
+   - Verification: Photo upload — call log showing escalation + outcome
+   - Completion: User uploads proof and marks complete
+
+3. **Switch Providers for Better Rate** (50 pts)
+   - Complete a service transfer to a cheaper provider
+   - Verification: Photo upload — confirmation of new service at lower rate
+   - Completion: User uploads proof and marks complete
+
+4. **Negotiate Annual Payment Discount** (35 pts)
+   - Switch a monthly bill to annual billing for a discount
+   - Verification: Photo upload — confirmation of new annual rate
+   - Completion: User uploads proof and marks complete
+
+5. **7-Day Call Streak** (40 pts)
+   - Make at least one negotiation call per day for 7 consecutive days
+   - Verification: Daily call log uploads required to maintain streak
+   - Anti-Gaming Rule: Missing one day resets streak
+   - Completion: User marks complete after 7 consecutive days
+
+---
+
 ## Anti-Gaming & Verification Logic
 
 ### Savings Deposits (Violet Tasks)
@@ -337,6 +415,21 @@ Each milestone must be completed in order—no skipping tiers.
 - Plaid integration provides real-time account balance monitoring
 - Transaction feed classifies purchases, balance transfers, and cash advances
 - Net payment progress = confirmed payments − new charges since challenge start
+
+### Negotiation Wins (Indigo Tasks)
+
+**Rule:** Rate reductions must be confirmed by the provider and show a lower rate than the audit baseline.
+
+- All negotiation call tasks use the photo upload flow — user uploads a screenshot as evidence
+- Screenshot EXIF date must fall within the challenge window; screenshots taken outside are rejected
+- Provider name/logo must be visible in the screenshot
+- Same provider may only generate one "win" entry; re-negotiating the same bill after 7 days is allowed but earns no additional points
+- New charge on a switched account must reflect the lower rate to count
+- 7-Day Call Streak requires a daily call log upload; missing one day resets the streak
+
+**Verification Method:**
+- User uploads photo evidence for each negotiation task
+- Annual savings auto-calculated: (old rate − new rate) × 12 months per confirmed win
 
 ### Investment Contributions (Teal Tasks)
 

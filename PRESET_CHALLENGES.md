@@ -1,6 +1,6 @@
-# Tournacent: Four Preset Challenges
+# Tournacent: Five Preset Challenges
 
-This document details the four challenges available for users to join immediately upon signing up.
+This document details the five challenges available for users to join immediately upon signing up.
 
 ---
 
@@ -9,7 +9,7 @@ This document details the four challenges available for users to join immediatel
 1. User signs up / logs in
 2. Home screen shows "No Active Challenges"
 3. User taps "Browse Challenges"
-4. Sees all four preset challenges with key details
+4. Sees all five preset challenges with key details
 5. Taps "Join Challenge" to add themselves
 6. Gets taken to onboarding (payment, account linking)
 7. Joins the challenge and begins earning points
@@ -376,6 +376,83 @@ A 30-day investment initiation challenge designed for first-time investors who h
 
 ---
 
+## Challenge 5: Bill Negotiation Blitz
+
+### Overview
+
+A 30-day negotiation challenge designed for users paying above-market rates on recurring bills. Focus: build confidence in negotiation conversations, reduce monthly fixed costs, and lock in long-term savings through strategic calls and plan switches.
+
+**Duration:** 30 days
+**Buy-In:** $15 per person
+**Target Savings:** $50–$300 in annual recurring costs
+**Goal Outcome:** Negotiate at least 2 bills successfully, document savings, establish annual savings baseline
+
+### Mandatory Tasks
+
+| Task | Points | How to Complete | Verification |
+|------|--------|-----------------|--------------|
+| Complete Bill Audit Worksheet | 20 | List all recurring bills with current rates | Form submission with 5+ bills |
+| Research Market Rates | 25 | Find competitor pricing for 3+ services | Screenshot/URL documentation |
+| Script Your First Call | 15 | Write 60-second negotiation opener | Text saved in system |
+| Make First Negotiation Call | 35 | Call one provider, attempt rate reduction | Upload call log screenshot with timestamp + outcome |
+| Secure First Win (Any Amount) | 50 | Get any rate reduction or credit applied | Upload screenshot of confirmation |
+| Negotiate Second Bill | 40 | Call different provider category | Upload call log + outcome documentation |
+| Document Total Annual Savings | 45 | Calculate 12-month savings from all wins | Auto-calculated from confirmed reductions |
+
+**Anti-Gaming Rules:**
+- Savings must be confirmed by provider (screenshot of email or new rate with confirmation number)
+- Same-provider wins separated by 7+ days to prevent gaming call volume
+- Screenshots must have EXIF date during challenge window and show provider name/logo
+
+### Optional Tasks
+
+| Task | Points | How to Complete |
+|------|--------|-----------------|
+| Negotiate Third Bill | 45 | Additional provider call with uploaded confirmation of savings |
+| Threaten to Cancel (Retention Dept) | 30 | Escalate to cancellation/retention team, upload proof of result |
+| Switch Providers for Better Rate | 50 | Complete service transfer with uploaded proof of switch |
+| Negotiate Annual Payment Discount | 35 | Switch to annual billing for discount, upload confirmation |
+| 7-Day Call Streak | 40 | Make one negotiation call per day × 7 days |
+
+**Max Optional Points:** 200
+**Total Possible:** 430 points
+
+### Color Coding
+
+- **Indigo (Negotiation):** Call and win tasks requiring photo upload
+  - Make First Call, Secure First Win, Negotiate Second/Third Bill, Threaten to Cancel, Annual Discount
+  - Color: #6366F1
+
+- **Blue (Budget):** Audit and calculation tasks
+  - Complete Bill Audit Worksheet, Document Total Annual Savings
+  - Color: #3B82F6
+
+- **Green (Reading):** Research tasks
+  - Research Market Rates
+  - Color: #10B981
+
+- **Red (Subscription):** Provider switch task
+  - Switch Providers for Better Rate
+  - Color: #EF4444
+
+- **Lime Green (No-Spend):** Streak task
+  - 7-Day Call Streak
+  - Color: #84CC16
+
+- **Gray (Custom):** Self-reported text entry
+  - Script Your First Call
+  - Color: #6B7280
+
+### Success Criteria
+
+**Win the prize if:**
+- Complete all 7 mandatory negotiation tasks
+- Secure at least 2 confirmed rate reductions
+- Document $100+ in total annual savings
+- Highest points at end of challenge
+
+---
+
 ## Anti-Gaming Safeguards (Investment Starter)
 
 1. **Withdrawal Lock**
@@ -451,8 +528,8 @@ For these tasks, users manually log:
 | Verification Type | Task | API/Tool |
 |-------------------|------|----------|
 | Real-time bank feed | Deposits, no-spend streaks, savings goal, debt payments, investment contributions | Plaid |
-| Manual logging | Expense/spending tracking, interest calculation, debt avalanche, investment goals, ETF research | In-app form |
-| Photo/proof | Subscription cancellation, APR negotiation, bill cuts, side hustle, investment account opening | User upload |
+| Manual logging | Expense/spending tracking, interest calculation, debt avalanche, investment goals, ETF research, bill audit, negotiation scripts | In-app form |
+| Photo/proof | Subscription cancellation, APR negotiation, bill cuts, side hustle, investment account opening, negotiation call logs, win confirmations, provider switches | User upload |
 | Automatic count | Cooked meals, recurring investment transfers | In-app logging |
 | In-app quiz | Risk assessment | Auto-graded |
 
@@ -576,6 +653,7 @@ For **No-Spend Reset:**
 - **Blue (#3B82F6):** Budget/goal-related tasks
 - **Orange (#F59E0B):** Cooking/meal prep tasks
 - **Teal (#0D9488):** Investment milestone tasks
+- **Indigo (#6366F1):** Negotiation call and win tasks
 - **Orange (#F97316):** Debt payment tasks
 - **Red (#EF4444):** Subscription cancellation / evidence-upload tasks
 - **Green (#10B981):** Education/reading tasks

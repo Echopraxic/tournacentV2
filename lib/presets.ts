@@ -9,6 +9,7 @@ export type TaskType =
   | 'reading'
   | 'debt_payment'
   | 'investment'
+  | 'negotiation'
   | 'custom';
 
 export interface PresetTask {
@@ -298,6 +299,100 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 25,
         is_mandatory: false,
         task_type: 'budget',
+      },
+    ],
+  },
+  {
+    id: 'bill-negotiation-blitz',
+    name: 'Bill Negotiation Blitz',
+    duration_days: 30,
+    buy_in_amount: 15.00,
+    tasks: [
+      // Mandatory
+      {
+        title: 'Complete Bill Audit Worksheet',
+        description: 'List all recurring bills with provider names, current rates, and contract end dates (5+ bills required)',
+        points: 20,
+        is_mandatory: true,
+        task_type: 'budget',
+      },
+      {
+        title: 'Research Market Rates',
+        description: 'Find competitor pricing for 3+ services and upload screenshots with URLs',
+        points: 25,
+        is_mandatory: true,
+        task_type: 'reading',
+      },
+      {
+        title: 'Script Your First Call',
+        description: 'Write a 60-second negotiation opener and save it in the app',
+        points: 15,
+        is_mandatory: true,
+        task_type: 'custom',
+      },
+      {
+        title: 'Make First Negotiation Call',
+        description: 'Call a provider and attempt a rate reduction — upload a screenshot of the call log with date, provider, and outcome',
+        points: 35,
+        is_mandatory: true,
+        task_type: 'negotiation',
+      },
+      {
+        title: 'Secure First Win',
+        description: 'Get any rate reduction or credit applied — upload screenshot of confirmation email or new rate',
+        points: 50,
+        is_mandatory: true,
+        task_type: 'negotiation',
+      },
+      {
+        title: 'Negotiate Second Bill',
+        description: 'Call a different provider category and upload call log with outcome documentation',
+        points: 40,
+        is_mandatory: true,
+        task_type: 'negotiation',
+      },
+      {
+        title: 'Document Total Annual Savings',
+        description: 'Calculate and submit 12-month savings across all confirmed rate reductions',
+        points: 45,
+        is_mandatory: true,
+        task_type: 'budget',
+      },
+      // Optional
+      {
+        title: 'Negotiate Third Bill',
+        description: 'Call an additional provider and upload confirmation of savings',
+        points: 45,
+        is_mandatory: false,
+        task_type: 'negotiation',
+      },
+      {
+        title: 'Threaten to Cancel (Retention Dept)',
+        description: 'Escalate a call to the cancellation/retention team and upload proof of result',
+        points: 30,
+        is_mandatory: false,
+        task_type: 'negotiation',
+      },
+      {
+        title: 'Switch Providers for Better Rate',
+        description: 'Complete a service transfer to a cheaper provider and upload proof of switch',
+        points: 50,
+        is_mandatory: false,
+        task_type: 'subscription',
+      },
+      {
+        title: 'Negotiate Annual Payment Discount',
+        description: 'Switch a monthly bill to annual billing for a discount — upload confirmation of new rate',
+        points: 35,
+        is_mandatory: false,
+        task_type: 'negotiation',
+      },
+      {
+        title: '7-Day Call Streak',
+        description: 'Make at least one negotiation call per day for 7 consecutive days',
+        points: 40,
+        is_mandatory: false,
+        task_type: 'no_spend',
       },
     ],
   },

@@ -403,7 +403,7 @@ export default function Tasks() {
       }
 
       let evidenceStoragePath: string | null = null;
-      if (selectedTask.task_type === 'subscription') {
+      if (['subscription', 'negotiation'].includes(selectedTask.task_type)) {
         evidenceStoragePath = await uploadEvidence(selectedTask.id);
       }
 
@@ -446,6 +446,7 @@ export default function Tasks() {
       reading: '#10B981',
       debt_payment: '#F97316',
       investment: '#0D9488',
+      negotiation: '#6366F1',
       custom: '#6B7280',
     };
     return colors[type] || colors.custom;
@@ -668,7 +669,7 @@ export default function Tasks() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {selectedTask?.task_type === 'subscription' ? (
+            {['subscription', 'negotiation'].includes(selectedTask?.task_type ?? '') ? (
               <>
                 <Text style={styles.modalTitle}>Upload Cancellation Proof</Text>
                 <Text style={styles.modalDescription}>

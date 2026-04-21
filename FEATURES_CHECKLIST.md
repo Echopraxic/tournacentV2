@@ -20,7 +20,7 @@ Last updated: 2026-04-01
 - [x] Browse screen shows preset challenge templates
 - [x] Challenge cards show name, duration, buy-in, task count
 - [x] RLS policy allows authenticated users to see templates (`is_template = true`)
-- [x] 4 preset templates seeded: "30-Day Emergency Fund Sprint", "No-Spend Reset Challenge", "Debt Destroyer Sprint", "Investment Starter Challenge"
+- [x] 5 preset templates seeded: "30-Day Emergency Fund Sprint", "No-Spend Reset Challenge", "Debt Destroyer Sprint", "Investment Starter Challenge", "Bill Negotiation Blitz"
 - [x] Presets seeded without requiring a real user as organizer (migration `20260329000001`)
 
 ---

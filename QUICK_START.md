@@ -63,7 +63,7 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 ### Browse Challenges
 1. Home screen shows "No Active Challenge" on first login
 2. Tap **Browse Challenges**
-3. Four preset challenges appear: "30-Day Emergency Fund Sprint", "No-Spend Reset Challenge", "Debt Destroyer Sprint", and "Investment Starter Challenge"
+3. Five preset challenges appear: "30-Day Emergency Fund Sprint", "No-Spend Reset Challenge", "Debt Destroyer Sprint", "Investment Starter Challenge", and "Bill Negotiation Blitz"
 4. Tap a challenge to open the selection modal
 
 ### Solo Challenge
@@ -110,7 +110,7 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 
 ---
 
-## Four Preset Challenges
+## Five Preset Challenges
 
 ### 30-Day Emergency Fund Sprint
 | | |
@@ -147,6 +147,15 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 | Goal | Open account, invest $300+, automate contributions |
 | Mandatory Tasks | 7 account opening and investment milestones |
 | Optional Tasks | 7 education, research, and growth tasks |
+
+### Bill Negotiation Blitz
+| | |
+|--|--|
+| Duration | 30 days |
+| Buy-In | $15.00 |
+| Goal | Negotiate 2+ bills, document $100+ in annual savings |
+| Mandatory Tasks | 7 bill audit, call, and win milestones |
+| Optional Tasks | 5 escalation, switching, and streak tasks |
 
 ---
 
