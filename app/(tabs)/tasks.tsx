@@ -444,6 +444,8 @@ export default function Tasks() {
       cooking: '#F59E0B',
       subscription: '#EF4444',
       reading: '#10B981',
+      debt_payment: '#F97316',
+      investment: '#0D9488',
       custom: '#6B7280',
     };
     return colors[type] || colors.custom;

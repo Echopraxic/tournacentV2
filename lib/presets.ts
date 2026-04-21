@@ -7,6 +7,8 @@ export type TaskType =
   | 'cooking'
   | 'subscription'
   | 'reading'
+  | 'debt_payment'
+  | 'investment'
   | 'custom';
 
 export interface PresetTask {
@@ -101,6 +103,201 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: false,
         task_type: 'no_spend',
+      },
+    ],
+  },
+  {
+    id: 'debt-destroyer-sprint',
+    name: 'Debt Destroyer Sprint',
+    duration_days: 30,
+    buy_in_amount: 25.00,
+    tasks: [
+      // Mandatory
+      {
+        title: 'Connect Debt Account',
+        description: 'Link your credit card or loan account via Plaid to enable balance monitoring',
+        points: 25,
+        is_mandatory: true,
+        task_type: 'savings',
+      },
+      {
+        title: 'Calculate Interest Cost',
+        description: 'Input your APR to see your monthly interest cost and target payoff amount',
+        points: 15,
+        is_mandatory: true,
+        task_type: 'budget',
+      },
+      {
+        title: 'Pay $100 Toward Debt',
+        description: 'Submit your first $100 payment to your target debt account',
+        points: 30,
+        is_mandatory: true,
+        task_type: 'debt_payment',
+      },
+      {
+        title: 'Pay $500 Total Toward Debt',
+        description: 'Accumulate $500 in net principal payments on your target account',
+        points: 50,
+        is_mandatory: true,
+        task_type: 'debt_payment',
+      },
+      {
+        title: 'Pay Off One Debt Completely',
+        description: 'Reach a zero balance on your smallest debt account within 30 days',
+        points: 100,
+        is_mandatory: true,
+        task_type: 'debt_payment',
+      },
+      // Optional
+      {
+        title: '21-Day Spending Freeze Streak',
+        description: 'Zero discretionary spending for 21 consecutive days',
+        points: 40,
+        is_mandatory: false,
+        task_type: 'no_spend',
+      },
+      {
+        title: 'Negotiate Lower APR',
+        description: 'Call your issuer and upload a screenshot confirming your new lower rate',
+        points: 35,
+        is_mandatory: false,
+        task_type: 'subscription',
+      },
+      {
+        title: 'Side Hustle $200+',
+        description: 'Earn extra income and upload a deposit screenshot, invoice, or payment proof',
+        points: 50,
+        is_mandatory: false,
+        task_type: 'custom',
+      },
+      {
+        title: 'Cut 3 Monthly Bills',
+        description: 'Reduce or cancel 3 recurring services and upload cancellation confirmations',
+        points: 30,
+        is_mandatory: false,
+        task_type: 'subscription',
+      },
+      {
+        title: 'Debt Avalanche Calculation',
+        description: 'Input all your debts to generate a prioritized payoff order by interest rate',
+        points: 25,
+        is_mandatory: false,
+        task_type: 'budget',
+      },
+      {
+        title: 'No-New-Debt 30 Days',
+        description: 'Zero new credit applications or hard inquiries throughout the entire challenge',
+        points: 45,
+        is_mandatory: false,
+        task_type: 'no_spend',
+      },
+    ],
+  },
+  {
+    id: 'investment-starter',
+    name: 'Investment Starter Challenge',
+    duration_days: 30,
+    buy_in_amount: 20.00,
+    tasks: [
+      // Mandatory
+      {
+        title: 'Complete Risk Assessment Quiz',
+        description: 'Answer 10 questions about your risk tolerance to determine your investment profile',
+        points: 20,
+        is_mandatory: true,
+        task_type: 'reading',
+      },
+      {
+        title: 'Open Investment Account',
+        description: 'Create a brokerage or retirement account (IRA/401k) and upload a screenshot of confirmation',
+        points: 30,
+        is_mandatory: true,
+        task_type: 'custom',
+      },
+      {
+        title: 'Connect Investment Account',
+        description: 'Link your brokerage or retirement account via Plaid or manual connection',
+        points: 25,
+        is_mandatory: true,
+        task_type: 'savings',
+      },
+      {
+        title: 'Set Investment Goal',
+        description: 'Define your target investment amount and timeline of 5+ years',
+        points: 15,
+        is_mandatory: true,
+        task_type: 'budget',
+      },
+      {
+        title: 'Invest $100 Initial',
+        description: 'Transfer and invest your first $100 into your account (must be invested, not cash)',
+        points: 35,
+        is_mandatory: true,
+        task_type: 'investment',
+      },
+      {
+        title: 'Automate Monthly Contribution',
+        description: 'Set up a recurring auto-deposit of $50 or more per month',
+        points: 50,
+        is_mandatory: true,
+        task_type: 'investment',
+      },
+      {
+        title: 'Invest $300 Total',
+        description: 'Reach $300 in total invested contributions by day 30',
+        points: 60,
+        is_mandatory: true,
+        task_type: 'investment',
+      },
+      // Optional
+      {
+        title: 'Read "Investing 101" Lesson',
+        description: 'Complete the educational module and quiz on investment fundamentals',
+        points: 25,
+        is_mandatory: false,
+        task_type: 'reading',
+      },
+      {
+        title: 'Research & Select 3 ETFs',
+        description: 'Document 3 ETF ticker symbols with a 50-word rationale for each selection',
+        points: 30,
+        is_mandatory: false,
+        task_type: 'reading',
+      },
+      {
+        title: '30-Day Market News Fast',
+        description: 'Avoid checking portfolio or stock prices for the entire 30-day challenge',
+        points: 35,
+        is_mandatory: false,
+        task_type: 'no_spend',
+      },
+      {
+        title: 'Increase Auto-Contribution to $100',
+        description: 'Raise your recurring deposit to $100 or more per month',
+        points: 40,
+        is_mandatory: false,
+        task_type: 'investment',
+      },
+      {
+        title: 'Invest $600 Total',
+        description: 'Reach $600 in total invested contributions by day 30',
+        points: 50,
+        is_mandatory: false,
+        task_type: 'investment',
+      },
+      {
+        title: 'Join Investment Community Discussion',
+        description: 'Post a question or insight (50+ words) in a community investment forum',
+        points: 20,
+        is_mandatory: false,
+        task_type: 'custom',
+      },
+      {
+        title: 'Calculate Compound Growth Projection',
+        description: 'Use the in-app calculator and screenshot your 10-year compound growth projection',
+        points: 25,
+        is_mandatory: false,
+        task_type: 'budget',
       },
     ],
   },

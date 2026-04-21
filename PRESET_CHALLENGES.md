@@ -1,6 +1,6 @@
-# Tournacent: Two Preset Challenges
+# Tournacent: Four Preset Challenges
 
-This document details the two challenges available for users to join immediately upon signing up.
+This document details the four challenges available for users to join immediately upon signing up.
 
 ---
 
@@ -9,7 +9,7 @@ This document details the two challenges available for users to join immediately
 1. User signs up / logs in
 2. Home screen shows "No Active Challenges"
 3. User taps "Browse Challenges"
-4. Sees both preset challenges with key details
+4. Sees all four preset challenges with key details
 5. Taps "Join Challenge" to add themselves
 6. Gets taken to onboarding (payment, account linking)
 7. Joins the challenge and begins earning points
@@ -184,6 +184,222 @@ Must complete 14 consecutive days of zero spending in declared categories. Canno
 
 ---
 
+## Challenge 3: Debt Destroyer Sprint
+
+### Overview
+
+A 30-day debt reduction challenge designed for users carrying credit card or loan balances. Focus: build aggressive payment habits, reduce interest costs, and eliminate one debt completely.
+
+**Duration:** 30 days
+**Buy-In:** $25 per person
+**Target Payoff:** $500 toward debt
+**Goal Outcome:** Eliminate smallest debt or reduce principal by 15%+
+
+### Mandatory Tasks
+
+| Task | Points | How to Complete | Verification |
+|------|--------|-----------------|--------------|
+| Connect Debt Account | 25 | Link credit card/loan via Plaid | One-time confirmation |
+| Calculate Interest Cost | 15 | Input APR, see monthly interest cost | Stored calculation |
+| Pay $100 Toward Debt | 30 | Submit payment to target account | Bank feed verification |
+| Pay $500 Total | 50 | Accumulate payments | Real-time balance check |
+| Pay Off One Debt Completely | 100 | Zero balance on smallest debt | Continuous monitoring |
+
+**Anti-Gaming Rules:**
+- Balance transfers from other cards = disqualification
+- Cash advances during challenge = disqualification
+- New charges on target account >$50 = disqualification
+- Only net principal reduction counts (payments minus new charges)
+
+### Optional Tasks
+
+| Task | Points | How to Complete |
+|------|--------|-----------------|
+| 21-Day Spending Freeze Streak | 40 | Zero discretionary spending × 21 days |
+| Negotiate Lower APR | 35 | Call issuer, screenshot new rate |
+| Side Hustle $200+ | 50 | Earn extra income, deposit proof |
+| Cut 3 Monthly Bills | 30 | Reduce/cancel services, upload proof |
+| Debt Avalanche Calculation | 25 | Map payoff order for all debts |
+| No-New-Debt 30 Days | 45 | Zero credit inquiries/applications |
+
+**Max Optional Points:** 225
+**Total Possible:** 445 points
+
+### Color Coding
+
+- **Orange (Debt Payment):** Payment milestone tasks
+  - Pay $100, Pay $500, Pay Off One Debt
+  - Color: #F97316
+
+- **Violet (Savings):** Account linking task
+  - Connect Debt Account
+  - Color: #A78BFA
+
+- **Blue (Budget):** Calculation tasks
+  - Calculate Interest Cost, Debt Avalanche Calculation
+
+- **Lime Green (No-Spend):** Streak and credit freeze tasks
+  - 21-Day Spending Freeze, No-New-Debt 30 Days
+  - Color: #84CC16
+
+- **Red (Subscription):** Evidence-upload tasks
+  - Negotiate Lower APR, Cut 3 Monthly Bills
+  - Color: #EF4444
+
+- **Gray (Custom):** Side income task
+  - Side Hustle $200+
+  - Color: #6B7280
+
+### Success Criteria
+
+**Win the prize if:**
+- Complete all 5 mandatory payment tasks
+- Pay off at least one debt completely OR pay $1,000+ toward principal
+- Maintain no-new-charges rule through day 30
+- Highest points at end of challenge
+
+**Disqualified if:**
+- Transfer balance from another card to inflate payoff
+- Take cash advance on any account
+- Charge >$50 to target debt account during challenge
+- Open new credit account or hard inquiry during challenge
+
+---
+
+## Anti-Gaming Safeguards (Debt Destroyer)
+
+1. **Balance Transfer Detection**
+   - Plaid flags transfers from other credit accounts
+   - Manual review of large lump payments >$1,000
+   - Disqualification if transfer fraud detected
+
+2. **Cash Advance Prevention**
+   - ATM withdrawals on credit cards monitored
+   - Cash equivalent transactions flagged
+   - Immediate disqualification on detection
+
+3. **New Charge Monitoring**
+   - Real-time transaction alerts on target account
+   - $50 threshold for automatic flagging
+   - User warned at $25, disqualified at $50+
+
+4. **Credit Inquiry Blocking**
+   - Soft monitoring for hard pulls during challenge
+   - Self-reported new accounts verified
+   - 30-day no-new-credit requirement enforced
+
+---
+
+## Challenge 4: Investment Starter Challenge
+
+### Overview
+
+A 30-day investment initiation challenge designed for first-time investors who have never contributed to a brokerage or retirement account. Focus: overcome analysis paralysis, open an investment account, and make your first automated contributions.
+
+**Duration:** 30 days
+**Buy-In:** $20 per person
+**Target Investment:** $300–$600 invested
+**Goal Outcome:** Open investment account, automate contributions, understand risk tolerance
+
+### Mandatory Tasks
+
+| Task | Points | How to Complete | Verification |
+|------|--------|-----------------|--------------|
+| Complete Risk Assessment Quiz | 20 | Answer 10 questions on risk tolerance | Auto-graded, stored result |
+| Open Investment Account | 30 | Create brokerage/retirement (IRA/401k) | Screenshot confirmation |
+| Connect Investment Account | 25 | Link via Plaid or manual connection | One-time confirmation |
+| Set Investment Goal | 15 | Define target amount & timeline (5+ years) | Stored in system |
+| Invest $100 Initial | 35 | Transfer & invest first $100 | Bank feed verification |
+| Automate Monthly Contribution | 50 | Set up recurring $50+/month auto-deposit | Recurring transfer confirmed |
+| Invest $300 Total | 60 | Reach $300 in contributions by day 30 | Continuous balance monitoring |
+
+**Anti-Gaming Rules:**
+- Withdrawals before challenge end = disqualification from investment milestones
+- Funds must remain invested (not cash position) to count
+- Account must be legitimate brokerage/retirement (not savings)
+- Manual one-time transfers don't count for the automation task
+
+### Optional Tasks
+
+| Task | Points | How to Complete |
+|------|--------|-----------------|
+| Read "Investing 101" Lesson | 25 | Complete educational module + quiz |
+| Research & Select 3 ETFs | 30 | Document ticker symbols & rationale |
+| 30-Day Market News Fast | 35 | No checking portfolio/stock prices × 30 days |
+| Increase Auto-Contribution to $100 | 40 | Raise recurring deposit to $100+/month |
+| Invest $600 Total | 50 | Reach $600 in contributions by day 30 |
+| Join Investment Community Discussion | 20 | Post question or insight (50+ words) in forum |
+| Calculate Compound Growth Projection | 25 | Use calculator, screenshot 10-year projection |
+
+**Max Optional Points:** 225
+**Total Possible:** 460 points
+
+### Color Coding
+
+- **Teal (Investment):** Investment milestone tasks
+  - Invest $100, Automate Contribution, Invest $300, Increase Auto-Contribution, Invest $600
+  - Color: #0D9488
+
+- **Violet (Savings):** Account linking task
+  - Connect Investment Account
+  - Color: #A78BFA
+
+- **Blue (Budget):** Goal and calculation tasks
+  - Set Investment Goal, Calculate Compound Growth Projection
+  - Color: #3B82F6
+
+- **Green (Reading):** Education and research tasks
+  - Risk Assessment Quiz, Read "Investing 101", Research & Select 3 ETFs
+  - Color: #10B981
+
+- **Lime Green (No-Spend):** Streak task
+  - 30-Day Market News Fast
+  - Color: #84CC16
+
+- **Gray (Custom):** Screenshot/self-reported tasks
+  - Open Investment Account, Join Community Discussion
+  - Color: #6B7280
+
+### Success Criteria
+
+**Win the prize if:**
+- Complete all 7 mandatory investment tasks
+- Maintain automated contributions through day 30
+- Keep funds invested (no panic selling)
+- Highest points at end of challenge
+
+**Disqualified if:**
+- Sell/withdraw investments before challenge ends
+- Cancel automated contributions during challenge
+- Open account with invalid/fraudulent documentation
+- Fail to complete risk assessment by day 10
+
+---
+
+## Anti-Gaming Safeguards (Investment Starter)
+
+1. **Withdrawal Lock**
+   - Account balance monitored daily
+   - Any sale/transfer out triggers immediate disqualification
+   - Cash position >10% of balance flagged for review
+
+2. **Automation Verification**
+   - Recurring transfers must be scheduled for 3+ months
+   - One-time manual deposits don't count toward automation task
+   - Plaid detects pattern of recurring deposits
+
+3. **Account Legitimacy**
+   - Screenshots reviewed for known brokerage logos
+   - Account numbers partially masked for privacy
+   - Invalid/fake accounts result in disqualification
+
+4. **Market News Fast**
+   - Daily check-in required ("Did you check prices today? Yes/No")
+   - Streak breaks if "Yes" reported
+   - Honor system with social accountability
+
+---
+
 ## How Verification Works
 
 ### Real-Time Monitoring (Automatic)
@@ -234,10 +450,11 @@ For these tasks, users manually log:
 
 | Verification Type | Task | API/Tool |
 |-------------------|------|----------|
-| Real-time bank feed | Deposits, no-spend streaks, savings goal | Plaid |
-| Manual logging | Expense/spending tracking | In-app form |
-| Photo/proof | Subscription cancellation, free alternatives | User upload |
-| Automatic count | Cooked meals, | In-app logging |
+| Real-time bank feed | Deposits, no-spend streaks, savings goal, debt payments, investment contributions | Plaid |
+| Manual logging | Expense/spending tracking, interest calculation, debt avalanche, investment goals, ETF research | In-app form |
+| Photo/proof | Subscription cancellation, APR negotiation, bill cuts, side hustle, investment account opening | User upload |
+| Automatic count | Cooked meals, recurring investment transfers | In-app logging |
+| In-app quiz | Risk assessment | Auto-graded |
 
 ---
 
@@ -358,9 +575,12 @@ For **No-Spend Reset:**
 - **Lime Green (#84CC16):** No-spend/avoid spending tasks
 - **Blue (#3B82F6):** Budget/goal-related tasks
 - **Orange (#F59E0B):** Cooking/meal prep tasks
-- **Red (#EF4444):** Subscription cancellation
+- **Teal (#0D9488):** Investment milestone tasks
+- **Orange (#F97316):** Debt payment tasks
+- **Red (#EF4444):** Subscription cancellation / evidence-upload tasks
 - **Green (#10B981):** Education/reading tasks
 - **Purple (#8B5CF6):** Tracking tasks
+- **Gray (#6B7280):** Custom/self-reported tasks
 
 ### Real-Time Updates
 

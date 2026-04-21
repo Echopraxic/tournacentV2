@@ -63,7 +63,7 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 ### Browse Challenges
 1. Home screen shows "No Active Challenge" on first login
 2. Tap **Browse Challenges**
-3. Two preset challenges appear: "30-Day Emergency Fund Sprint" and "No-Spend Reset Challenge"
+3. Four preset challenges appear: "30-Day Emergency Fund Sprint", "No-Spend Reset Challenge", "Debt Destroyer Sprint", and "Investment Starter Challenge"
 4. Tap a challenge to open the selection modal
 
 ### Solo Challenge
@@ -110,13 +110,13 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 
 ---
 
-## Two Preset Challenges
+## Four Preset Challenges
 
 ### 30-Day Emergency Fund Sprint
 | | |
 |--|--|
 | Duration | 30 days |
-| Buy-In | $17.50 |
+| Buy-In | $10.00 |
 | Goal | Build $250+ emergency savings |
 | Mandatory Tasks | 5 progressive deposit milestones |
 | Optional Tasks | 5 savings/tracking/no-spend tasks |
@@ -125,10 +125,28 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 | | |
 |--|--|
 | Duration | 21 days |
-| Buy-In | $15.00 |
+| Buy-In | $5.00 |
 | Goal | Reduce spending, save $150+ |
 | Mandatory Tasks | Declare categories + 7 and 14-day streaks |
 | Optional Tasks | 4 cooking/tracking/savings tasks |
+
+### Debt Destroyer Sprint
+| | |
+|--|--|
+| Duration | 30 days |
+| Buy-In | $25.00 |
+| Goal | Pay $500+ toward debt; eliminate one debt |
+| Mandatory Tasks | 5 debt payment milestones |
+| Optional Tasks | 6 spending/income/credit tasks |
+
+### Investment Starter Challenge
+| | |
+|--|--|
+| Duration | 30 days |
+| Buy-In | $20.00 |
+| Goal | Open account, invest $300+, automate contributions |
+| Mandatory Tasks | 7 account opening and investment milestones |
+| Optional Tasks | 7 education, research, and growth tasks |
 
 ---
 

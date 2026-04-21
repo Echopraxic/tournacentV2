@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tournacent features two beginner-level preset challenges that users can join. Each challenge has specific completion requirements, anti-gaming rules, and verification methods to ensure real behavioral change and prevent fraud.
+Tournacent features four preset challenges that users can join. Each challenge has specific completion requirements, anti-gaming rules, and verification methods to ensure real behavioral change and prevent fraud.
 
 ---
 
@@ -129,6 +129,167 @@ Each milestone must be completed in order—no skipping tiers.
 
 ---
 
+## Challenge 3: Debt Destroyer Sprint
+
+**Level:** Intermediate
+**Duration:** 30 Days
+**Buy-In:** $25
+**Target:** Users carrying credit card or loan balances
+**Goal:** Pay $500+ toward debt; eliminate one debt completely
+
+### Mandatory Tasks
+
+1. **Connect Debt Account** (25 pts)
+   - Link credit card or loan account via Plaid
+   - Verification: One-time connection confirmation
+   - Completion: Mark task complete after linking
+
+2. **Calculate Interest Cost** (15 pts)
+   - Input APR to see monthly interest cost and target payoff amount
+   - Verification: Calculation stored in system
+   - Completion: User marks complete after entering APR
+
+3. **Pay $100 Toward Debt** (30 pts)
+   - Submit first $100 payment to target debt account
+   - Verification: Bank feed confirms payment
+   - Anti-Gaming Rule: Only net principal reduction counts (payments minus new charges)
+   - Completion: Task auto-completes when $100 payment detected
+
+4. **Pay $500 Total Toward Debt** (50 pts)
+   - Accumulate $500 in net principal payments
+   - Verification: Real-time balance check
+   - Anti-Gaming Rule: New charges on target account offset payment credit
+   - Completion: Task auto-completes at $500 net reduction
+
+5. **Pay Off One Debt Completely** (100 pts)
+   - Reach a zero balance on smallest debt account within 30 days
+   - Verification: Continuous balance monitoring via Plaid
+   - Anti-Gaming Rule: Balance transfers from other cards = disqualification
+   - Completion: Task auto-completes when zero balance detected
+
+### Optional Tasks
+
+1. **21-Day Spending Freeze Streak** (40 pts)
+   - Zero discretionary spending for 21 consecutive days
+   - Verification: Bank transaction monitoring
+   - Anti-Gaming Rule: Any discretionary purchase breaks streak
+   - Completion: Task auto-completes at day 21
+
+2. **Negotiate Lower APR** (35 pts)
+   - Call issuer and obtain a lower interest rate
+   - Verification: User uploads screenshot confirming new rate/terms
+   - Completion: User uploads proof and marks complete
+
+3. **Side Hustle $200+** (50 pts)
+   - Earn extra income and apply it toward debt
+   - Verification: User uploads deposit screenshot, invoice, or payment proof
+   - Completion: User uploads proof and marks complete
+
+4. **Cut 3 Monthly Bills** (30 pts)
+   - Reduce or cancel 3 recurring services
+   - Verification: User uploads cancellation confirmations
+   - Completion: User uploads proof and marks complete
+
+5. **Debt Avalanche Calculation** (25 pts)
+   - Input all debts to generate a prioritized payoff order by interest rate
+   - Verification: System stores payoff map
+   - Completion: User marks complete after generating calculation
+
+6. **No-New-Debt 30 Days** (45 pts)
+   - Zero new credit applications or hard inquiries for entire challenge
+   - Verification: Monitoring for hard pulls; self-reported new accounts verified
+   - Completion: Task auto-completes at day 30 with no new inquiries detected
+
+---
+
+## Challenge 4: Investment Starter Challenge
+
+**Level:** Beginner
+**Duration:** 30 Days
+**Buy-In:** $20
+**Target:** First-time investors with no brokerage or retirement account
+**Goal:** Open account, invest $300+, automate contributions
+
+### Mandatory Tasks
+
+1. **Complete Risk Assessment Quiz** (20 pts)
+   - Answer 10 questions to determine risk tolerance and investment profile
+   - Verification: Auto-graded, result stored in system
+   - Completion: Task auto-completes on quiz submission
+
+2. **Open Investment Account** (30 pts)
+   - Create a brokerage or retirement account (IRA/401k) at any legitimate institution
+   - Verification: User uploads screenshot of welcome/confirmation page
+   - Completion: User uploads proof and marks complete
+
+3. **Connect Investment Account** (25 pts)
+   - Link brokerage or retirement account via Plaid or manual connection
+   - Verification: One-time connection confirmation
+   - Completion: Mark task complete after linking
+
+4. **Set Investment Goal** (15 pts)
+   - Define target investment amount and a timeline of 5+ years
+   - Verification: Goal stored in system
+   - Completion: User marks complete after entering goal
+
+5. **Invest $100 Initial** (35 pts)
+   - Transfer and invest your first $100 (must be in positions, not cash)
+   - Verification: Bank feed detects transfer + investment purchase
+   - Anti-Gaming Rule: Cash position does not count; funds must be in holdings
+   - Completion: Task auto-completes when $100 invested balance detected
+
+6. **Automate Monthly Contribution** (50 pts)
+   - Set up a recurring auto-deposit of $50 or more per month
+   - Verification: Plaid detects recurring transfer pattern
+   - Anti-Gaming Rule: Manual one-time deposits do not satisfy this task
+   - Completion: Task auto-completes when recurring transfer confirmed
+
+7. **Invest $300 Total** (60 pts)
+   - Reach $300 in total invested contributions by day 30
+   - Verification: Continuous balance monitoring (positions only)
+   - Anti-Gaming Rule: Any withdrawal or sale triggers disqualification
+   - Completion: Task auto-completes at $300 invested balance
+
+### Optional Tasks
+
+1. **Read "Investing 101" Lesson** (25 pts)
+   - Complete the educational module and quiz on investment fundamentals
+   - Verification: Module completion tracking, quiz auto-graded
+   - Completion: Auto-completes after module + quiz finished
+
+2. **Research & Select 3 ETFs** (30 pts)
+   - Document 3 ETF ticker symbols with a 50-word rationale for each
+   - Verification: Form entry reviewed
+   - Completion: User submits form and marks complete
+
+3. **30-Day Market News Fast** (35 pts)
+   - Avoid checking portfolio or stock prices for the entire 30-day challenge
+   - Verification: Daily check-in ("Did you check prices today? Yes/No")
+   - Anti-Gaming Rule: Streak breaks if "Yes" reported; honor system
+   - Completion: Auto-completes at day 30 with no "Yes" responses
+
+4. **Increase Auto-Contribution to $100** (40 pts)
+   - Raise recurring deposit to $100 or more per month
+   - Verification: Plaid confirms updated recurring transfer amount
+   - Completion: Task auto-completes when new recurring amount detected
+
+5. **Invest $600 Total** (50 pts)
+   - Reach $600 in total invested contributions by day 30
+   - Verification: Continuous balance monitoring
+   - Completion: Task auto-completes at $600 invested balance
+
+6. **Join Investment Community Discussion** (20 pts)
+   - Post a question or insight (50+ words) in a community investment forum
+   - Verification: Link to post submitted and verified
+   - Completion: User submits link and marks complete
+
+7. **Calculate Compound Growth Projection** (25 pts)
+   - Use the in-app calculator and screenshot the 10-year compound growth result
+   - Verification: Screenshot saved in system
+   - Completion: User uploads screenshot and marks complete
+
+---
+
 ## Anti-Gaming & Verification Logic
 
 ### Savings Deposits (Violet Tasks)
@@ -160,6 +321,33 @@ Each milestone must be completed in order—no skipping tiers.
 - Automatic bank transaction monitoring via Plaid
 - System categorizes transactions using merchant data
 - Streak counter updates daily based on zero-spending verification
+
+### Debt Payments (Orange Tasks)
+
+**Rule:** Only net principal reduction counts — payments minus new charges.
+
+- Plaid monitors balance on the linked debt account in real-time
+- New purchases on the target account reduce payment credit dollar-for-dollar
+- Balance transfers from other cards trigger immediate disqualification
+- Cash advances on any account trigger immediate disqualification
+- New charges >$50 on target account trigger disqualification; user warned at $25
+- Hard credit inquiries or new account openings during challenge invalidate the No-New-Debt task
+
+**Verification Method:**
+- Plaid integration provides real-time account balance monitoring
+- Transaction feed classifies purchases, balance transfers, and cash advances
+- Net payment progress = confirmed payments − new charges since challenge start
+
+### Investment Contributions (Teal Tasks)
+
+**Rule:** Funds must remain invested in positions — not sitting as cash — for the entire challenge.
+
+- Plaid monitors account balance and investment holdings daily
+- Any sale, withdrawal, or transfer out triggers immediate disqualification
+- Cash position >10% of account balance is flagged for review
+- Recurring transfer must be scheduled for 3+ months; one-time deposits do not satisfy the automation task
+- Plaid detects recurring transfer patterns to confirm automation
+- Screenshots of account opening reviewed for known brokerage logos; fake/invalid accounts disqualify
 
 ### Daily Tracking (All Challenges)
 
