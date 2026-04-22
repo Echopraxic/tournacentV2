@@ -9,6 +9,7 @@ import {
   Modal,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,7 +27,16 @@ import {
   Wallet as WalletIcon,
   Link as LinkIcon,
   RefreshCw,
+  Shield,
+  Trash2,
 } from 'lucide-react-native';
+
+const PLAID_CONSENT_VERSION = '1.0';
+const PLAID_CONSENT_TEXT =
+  'I authorise Tournacent to access my bank account transaction history via Plaid ' +
+  'to verify challenge task completion. This data is encrypted in transit and at rest, ' +
+  'used only for challenge verification, and never sold to third parties. ' +
+  'I have read and agree to the Privacy Policy.';
 
 interface Transaction {
   id: string;
@@ -65,7 +75,13 @@ export default function Wallet() {
   const [pendingBuyIn, setPendingBuyIn] = useState<ActiveChallenge | null>(null);
   const [payingIn, setPayingIn] = useState(false);
 
-  // Plaid Link state
+  // Consent modal state
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [consentSubmitting, setConsentSubmitting] = useState(false);
+  const [pendingLinkAction, setPendingLinkAction] = useState<(() => void) | null>(null);
+
+  // Plaid Link state — savings account
   const [plaidLinked, setPlaidLinked] = useState(false);
   const [institutionName, setInstitutionName] = useState<string | null>(null);
   const [showPlaidLink, setShowPlaidLink] = useState(false);
@@ -74,6 +90,16 @@ export default function Wallet() {
   const [syncingTransactions, setSyncingTransactions] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [plaidError, setPlaidError] = useState<string | null>(null);
+
+  // Plaid Link state — debt/credit card account
+  const [isDebtChallenge, setIsDebtChallenge] = useState(false);
+  const [debtLinked, setDebtLinked] = useState(false);
+  const [debtInstitutionName, setDebtInstitutionName] = useState<string | null>(null);
+  const [debtLastSyncedAt, setDebtLastSyncedAt] = useState<string | null>(null);
+  const [debtLinkTokenLoading, setDebtLinkTokenLoading] = useState(false);
+  const [debtSyncing, setDebtSyncing] = useState(false);
+  const [debtError, setDebtError] = useState<string | null>(null);
+  const [pendingLinkType, setPendingLinkType] = useState<'savings' | 'debt'>('savings');
 
   const fetchWalletData = useCallback(async () => {
     if (!user) return;
@@ -133,11 +159,29 @@ export default function Wallet() {
         setPendingBuyIn(null);
       }
 
-      // Load Plaid linked account info
+      // Load Plaid linked savings account info
       const linkedAccount = await plaidApi.getLinkedAccount();
       setPlaidLinked(!!linkedAccount);
       setInstitutionName(linkedAccount?.institution_name ?? null);
       setLastSyncedAt(linkedAccount?.last_synced_at ?? null);
+
+      // Determine if the active challenge has debt tasks (show credit card section)
+      if (participantData) {
+        const { count: debtTaskCount } = await supabase
+          .from('tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('challenge_id', participantData.challenge_id)
+          .eq('task_type', 'debt_payment');
+        setIsDebtChallenge((debtTaskCount ?? 0) > 0);
+      } else {
+        setIsDebtChallenge(false);
+      }
+
+      // Load linked debt/credit card account info
+      const debtAccount = await plaidApi.getLinkedDebtAccount();
+      setDebtLinked(!!debtAccount);
+      setDebtInstitutionName(debtAccount?.institution_name ?? null);
+      setDebtLastSyncedAt(debtAccount?.last_synced_at ?? null);
     } catch (error) {
       console.error('Error fetching wallet data:', error);
     } finally {
@@ -155,7 +199,61 @@ export default function Wallet() {
     fetchWalletData();
   };
 
-  const handleConnectBank = async () => {
+  const checkExistingConsent = async (): Promise<boolean> => {
+    if (!user) return false;
+    const { data } = await supabase
+      .from('user_consents')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('consent_type', 'plaid')
+      .eq('version', PLAID_CONSENT_VERSION)
+      .is('withdrawn_at', null)
+      .maybeSingle();
+    return !!data;
+  };
+
+  const recordConsent = async () => {
+    if (!user) return;
+    await supabase.from('user_consents').upsert(
+      {
+        user_id: user.id,
+        consent_type: 'plaid',
+        version: PLAID_CONSENT_VERSION,
+        consent_string: PLAID_CONSENT_TEXT,
+        accepted_at: new Date().toISOString(),
+        withdrawn_at: null,
+      },
+      { onConflict: 'user_id,consent_type,version' }
+    );
+  };
+
+  const openPlaidWithConsent = async (launchFn: () => void) => {
+    const alreadyConsented = await checkExistingConsent();
+    if (alreadyConsented) {
+      launchFn();
+    } else {
+      setConsentChecked(false);
+      setPendingLinkAction(() => launchFn);
+      setShowConsentModal(true);
+    }
+  };
+
+  const handleConsentAccept = async () => {
+    if (!consentChecked || !pendingLinkAction) return;
+    setConsentSubmitting(true);
+    try {
+      await recordConsent();
+      setShowConsentModal(false);
+      pendingLinkAction();
+      setPendingLinkAction(null);
+    } catch {
+      Alert.alert('Error', 'Failed to record consent. Please try again.');
+    } finally {
+      setConsentSubmitting(false);
+    }
+  };
+
+  const launchSavingsLink = async () => {
     setLinkTokenLoading(true);
     setPlaidError(null);
     try {
@@ -173,26 +271,102 @@ export default function Wallet() {
     }
   };
 
+  const launchDebtLink = async () => {
+    setDebtLinkTokenLoading(true);
+    setDebtError(null);
+    try {
+      const token = await plaidApi.createLinkToken();
+      if (!token) {
+        setDebtError('No link token returned from server. Check edge function logs.');
+        return;
+      }
+      setLinkToken(token);
+      setShowPlaidLink(true);
+    } catch (error: any) {
+      setDebtError(error.message || 'Failed to start credit card connection.');
+    } finally {
+      setDebtLinkTokenLoading(false);
+    }
+  };
+
+  const handleConnectBank = () => {
+    setPendingLinkType('savings');
+    openPlaidWithConsent(launchSavingsLink);
+  };
+
+  const handleConnectDebtAccount = () => {
+    setPendingLinkType('debt');
+    openPlaidWithConsent(launchDebtLink);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete your account, all challenge history, bank connections, and personal data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete My Account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.rpc('delete_user_data');
+              if (error) throw error;
+              await supabase.auth.signOut();
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to delete account. Please contact support.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handlePlaidSuccess = async (publicToken: string, metadata: any) => {
     setShowPlaidLink(false);
     setLinkToken(null);
     try {
-      await plaidApi.exchangeToken(publicToken, metadata);
-      // Force an immediate sync after linking — bypasses the 1-hour cooldown
-      const result = await plaidApi.syncTransactions(true);
-      setLastSyncedAt(result.last_synced_at);
-      const linkedAccount = await plaidApi.getLinkedAccount();
-      setPlaidLinked(true);
-      setInstitutionName(linkedAccount?.institution_name ?? null);
-      Alert.alert('Bank Connected', 'Your bank account is now linked and transactions are syncing.');
+      await plaidApi.exchangeToken(publicToken, metadata, pendingLinkType);
+      if (pendingLinkType === 'debt') {
+        // Force sync so debt transactions and balances populate immediately
+        await plaidApi.syncDebtTransactions(true);
+        setDebtLinked(true);
+        setDebtInstitutionName(metadata?.institution?.name ?? null);
+        Alert.alert('Credit Card Connected', 'Your credit card account is now linked and syncing.');
+      } else {
+        const result = await plaidApi.syncTransactions(true);
+        setLastSyncedAt(result.last_synced_at);
+        const linkedAccount = await plaidApi.getLinkedAccount();
+        setPlaidLinked(true);
+        setInstitutionName(linkedAccount?.institution_name ?? null);
+        Alert.alert('Bank Connected', 'Your bank account is now linked and transactions are syncing.');
+      }
     } catch (error: any) {
-      Alert.alert('Connection Error', error.message || 'Failed to link bank account.');
+      Alert.alert('Connection Error', error.message || 'Failed to link account.');
     }
   };
 
   const handlePlaidExit = () => {
     setShowPlaidLink(false);
     setLinkToken(null);
+  };
+
+  const handleSyncDebtTransactions = async () => {
+    setDebtSyncing(true);
+    try {
+      const result = await plaidApi.syncDebtTransactions();
+      setDebtLastSyncedAt(result.last_synced_at);
+      Alert.alert('Synced', `${result.synced} transaction${result.synced !== 1 ? 's' : ''} synced from your credit card.`);
+    } catch (error: any) {
+      if (error.rateLimited) {
+        Alert.alert('Already Up to Date', error.message || `Next sync available in ${error.retryAfterMinutes} minutes.`);
+        if (error.lastSyncedAt) setDebtLastSyncedAt(error.lastSyncedAt);
+      } else {
+        Alert.alert('Sync Error', error.message || 'Failed to sync credit card transactions.');
+      }
+    } finally {
+      setDebtSyncing(false);
+    }
   };
 
   const handleSyncTransactions = async () => {
@@ -345,6 +519,55 @@ export default function Wallet() {
       <View style={[styles.header, { backgroundColor: theme.surface }]}>
         <Text style={[styles.headerTitle, { color: theme.text }]}>Wallet</Text>
       </View>
+
+      {/* Plaid Consent Modal */}
+      <Modal
+        visible={showConsentModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowConsentModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowConsentModal(false)}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Bank Data Consent</Text>
+            <View style={{ width: 60 }} />
+          </View>
+          <ScrollView style={styles.consentScroll} contentContainerStyle={styles.consentContent}>
+            <View style={styles.consentIconRow}>
+              <Shield color="#10B981" size={32} />
+              <Text style={styles.consentHeading}>Your Privacy Matters</Text>
+            </View>
+            <Text style={styles.consentBody}>{PLAID_CONSENT_TEXT}</Text>
+            <TouchableOpacity
+              style={styles.consentCheckRow}
+              onPress={() => setConsentChecked((v) => !v)}
+            >
+              <View style={[styles.checkbox, consentChecked && styles.checkboxChecked]}>
+                {consentChecked && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.consentCheckLabel}>
+                I agree to the above and confirm I am 13 years of age or older
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => Linking.openURL('https://tournacent.com/privacy')}>
+              <Text style={styles.privacyLinkSmall}>Read full Privacy Policy →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.consentAcceptBtn, (!consentChecked || consentSubmitting) && styles.consentAcceptBtnDisabled]}
+              onPress={handleConsentAccept}
+              disabled={!consentChecked || consentSubmitting}
+            >
+              {consentSubmitting
+                ? <ActivityIndicator size="small" color="#ffffff" />
+                : <Text style={styles.consentAcceptBtnText}>Connect Bank Account</Text>
+              }
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* Plaid Link Modal */}
       <Modal
@@ -517,6 +740,86 @@ export default function Wallet() {
           </Card>
         </View>
 
+        {/* Credit Card (Debt) Section — shown only for debt challenges */}
+        {isDebtChallenge && (
+          <View style={styles.plaidSection}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Credit Card (Plaid)</Text>
+            <Text style={[styles.debtSectionHint, { color: theme.subtext }]}>
+              Connect your credit card or loan account so the app can verify your payments and monitor new charges during the Debt Destroyer challenge.
+            </Text>
+
+            <Card style={styles.plaidCard}>
+              <View style={styles.plaidHeader}>
+                <View style={styles.plaidInfo}>
+                  <CreditCard color={debtLinked ? theme.primary : theme.subtext} size={24} />
+                  <View style={styles.plaidTextGroup}>
+                    <Text style={[styles.plaidLabel, { color: theme.text }]}>
+                      {debtLinked ? 'Credit Card Connected' : 'No Credit Card Linked'}
+                    </Text>
+                    {debtInstitutionName && (
+                      <Text style={[styles.institutionName, { color: theme.primary }]}>{debtInstitutionName}</Text>
+                    )}
+                  </View>
+                </View>
+                {debtLinked && <CheckCircle color={theme.primary} size={24} />}
+              </View>
+
+              {!debtLinked && (
+                <View style={styles.plaidExplainerBox}>
+                  <Text style={styles.plaidExplainerText}>
+                    Required to verify debt payments and detect new charges that break your spending freeze streak.
+                  </Text>
+                </View>
+              )}
+
+              {debtError && (
+                <View style={styles.plaidErrorBox}>
+                  <Text style={styles.plaidErrorText}>{debtError}</Text>
+                </View>
+              )}
+
+              {debtLinked ? (
+                <>
+                  {debtLastSyncedAt && (
+                    <Text style={[styles.lastSyncedText, { color: theme.subtext }]}>
+                      Last synced {formatLastSynced(debtLastSyncedAt)}
+                    </Text>
+                  )}
+                  <TouchableOpacity
+                    style={[styles.syncButton, { borderColor: theme.primary, backgroundColor: theme.background }]}
+                    onPress={handleSyncDebtTransactions}
+                    disabled={debtSyncing}
+                  >
+                    {debtSyncing ? (
+                      <ActivityIndicator size="small" color={theme.primary} />
+                    ) : (
+                      <RefreshCw size={16} color={theme.primary} />
+                    )}
+                    <Text style={[styles.syncButtonText, { color: theme.primary }]}>
+                      {debtSyncing ? 'Syncing...' : 'Sync Credit Card'}
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.connectButton, { backgroundColor: '#F97316' }]}
+                  onPress={handleConnectDebtAccount}
+                  disabled={debtLinkTokenLoading}
+                >
+                  {debtLinkTokenLoading ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <LinkIcon size={16} color="#ffffff" />
+                  )}
+                  <Text style={styles.connectButtonText}>
+                    {debtLinkTokenLoading ? 'Preparing...' : 'Connect Credit Card via Plaid'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </Card>
+          </View>
+        )}
+
         {/* Prize Pool Section */}
         {prizePoolStatus && (
           <View style={styles.prizePoolSection}>
@@ -561,6 +864,21 @@ export default function Wallet() {
             </Card>
           </View>
         )}
+
+        {/* Privacy & Account Section */}
+        <View style={styles.privacySection}>
+          <TouchableOpacity
+            style={styles.privacyLinkRow}
+            onPress={() => Linking.openURL('https://tournacent.com/privacy')}
+          >
+            <Shield color={theme.subtext} size={16} />
+            <Text style={[styles.privacyLinkText, { color: theme.subtext }]}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.deleteAccountRow} onPress={handleDeleteAccount}>
+            <Trash2 color="#DC2626" size={16} />
+            <Text style={styles.deleteAccountText}>Delete My Account</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Transaction History Section */}
         <View style={styles.transactionsSection}>
@@ -790,6 +1108,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  debtSectionHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: -8,
+  },
   // Plaid Section
   plaidSection: {
     gap: 12,
@@ -931,6 +1254,107 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#92400E',
     lineHeight: 20,
+  },
+  // Consent modal
+  consentScroll: {
+    flex: 1,
+  },
+  consentContent: {
+    padding: 24,
+    gap: 20,
+  },
+  consentIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  consentHeading: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  consentBody: {
+    fontSize: 14,
+    color: '#374151',
+    lineHeight: 22,
+  },
+  consentCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  checkmark: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  consentCheckLabel: {
+    flex: 1,
+    fontSize: 14,
+    color: '#374151',
+    lineHeight: 20,
+  },
+  privacyLinkSmall: {
+    fontSize: 13,
+    color: '#10B981',
+    fontWeight: '500',
+  },
+  consentAcceptBtn: {
+    backgroundColor: '#10B981',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  consentAcceptBtnDisabled: {
+    backgroundColor: '#9CA3AF',
+  },
+  consentAcceptBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  // Privacy & account
+  privacySection: {
+    gap: 8,
+    paddingVertical: 8,
+  },
+  privacyLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  privacyLinkText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  deleteAccountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  deleteAccountText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#DC2626',
   },
   // Transactions
   transactionsSection: {

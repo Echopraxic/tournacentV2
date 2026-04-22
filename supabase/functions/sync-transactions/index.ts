@@ -5,6 +5,32 @@ const PLAID_CLIENT_ID = Deno.env.get('PLAID_CLIENT_ID')!;
 const PLAID_SECRET = Deno.env.get('PLAID_SECRET')!;
 const PLAID_ENV = Deno.env.get('PLAID_ENV') || 'sandbox';
 
+// ── Encryption helpers ────────────────────────────────────────────────────────
+
+const ENC_PREFIX = 'enc:v1:';
+
+function b64Decode(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function getEncKey(): Promise<CryptoKey | null> {
+  const raw = Deno.env.get('PLAID_ENCRYPTION_KEY');
+  if (!raw) return null;
+  return crypto.subtle.importKey('raw', b64Decode(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+async function decryptAccessToken(stored: string, key: CryptoKey): Promise<string> {
+  if (!stored.startsWith(ENC_PREFIX)) return stored; // backwards-compat: plaintext
+  const combined = b64Decode(stored.slice(ENC_PREFIX.length));
+  const iv = combined.slice(0, 12);
+  const ct = combined.slice(12);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+  return new TextDecoder().decode(plain);
+}
+
 const PLAID_BASE_URLS: Record<string, string> = {
   sandbox: 'https://sandbox.plaid.com',
   development: 'https://development.plaid.com',
@@ -54,11 +80,13 @@ serve(async (req) => {
     // Enforce 1-hour cooldown on manual syncs (pass force=true to bypass, e.g. post-link)
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
     const force = body.force === true;
+    const itemType: string = body.item_type ?? 'savings';
 
     const { data: plaidItem, error: itemError } = await supabase
       .from('plaid_items')
       .select('access_token, cursor, last_synced_at')
       .eq('user_id', user.id)
+      .eq('item_type', itemType)
       .maybeSingle();
 
     if (itemError || !plaidItem) {
@@ -99,9 +127,15 @@ serve(async (req) => {
       );
     }
 
+    // Decrypt access token before use
+    const encKey = await getEncKey();
+    const accessToken = encKey
+      ? await decryptAccessToken(plaidItem.access_token, encKey)
+      : plaidItem.access_token;
+
     // Incremental sync using /transactions/sync with stored cursor
     const { added, modified, removed, nextCursor } = await syncIncremental(
-      plaidItem.access_token,
+      accessToken,
       plaidItem.cursor ?? null
     );
 
@@ -120,6 +154,7 @@ serve(async (req) => {
           ? [tx.personal_finance_category.primary]
           : (tx.category ?? []),
         pending: tx.pending ?? false,
+        item_type: itemType,
       }));
 
       await supabase
@@ -141,7 +176,8 @@ serve(async (req) => {
     await supabase
       .from('plaid_items')
       .update({ cursor: nextCursor, last_synced_at: now })
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .eq('item_type', itemType);
 
     return new Response(
       JSON.stringify({

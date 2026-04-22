@@ -8,6 +8,19 @@
   1. Add evidence_url column to task_completions
   2. Create private storage bucket 'task-evidence'
   3. RLS: users can only upload/read files under their own user_id folder
+
+  ──────────────────────────────────────────────────────────────────────────────
+  PATH FORMAT CONTRACT (must not change without updating RLS below):
+
+    task-evidence/{user_id}/{task_id}/{filename}
+
+  RLS verifies (storage.foldername(name))[1] = auth.uid()::text, meaning the
+  FIRST path segment must be the authenticated user's UUID.
+
+  ⚠️  If the upload path format ever changes (e.g. {challengeId}/{userId}/...),
+      update ALL three storage policies in this migration to match the new
+      segment index, otherwise cross-user access will be silently permitted.
+  ──────────────────────────────────────────────────────────────────────────────
 */
 
 -- Add evidence_url to task_completions

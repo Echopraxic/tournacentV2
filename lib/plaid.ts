@@ -60,7 +60,11 @@ export const plaidApi = {
    * Exchanges the public_token from Plaid Link for a permanent access token.
    * Stores the access token server-side (never exposed to the client).
    */
-  async exchangeToken(publicToken: string, metadata: PlaidMetadata): Promise<void> {
+  async exchangeToken(
+    publicToken: string,
+    metadata: PlaidMetadata,
+    itemType: 'savings' | 'debt' = 'savings'
+  ): Promise<void> {
     const token = await getAuthToken();
     const response = await fetch(`${SUPABASE_URL}/functions/v1/exchange-token`, {
       method: 'POST',
@@ -72,6 +76,7 @@ export const plaidApi = {
         public_token: publicToken,
         institution_name: metadata.institution?.name,
         institution_id: metadata.institution?.institution_id,
+        item_type: itemType,
       }),
     });
     const data = await response.json();
@@ -126,7 +131,43 @@ export const plaidApi = {
     const { data } = await supabase
       .from('plaid_items')
       .select('institution_name, last_synced_at')
+      .eq('item_type', 'savings')
       .maybeSingle();
     return data ?? null;
+  },
+
+  async getLinkedDebtAccount(): Promise<LinkedAccount | null> {
+    const { data } = await supabase
+      .from('plaid_items')
+      .select('institution_name, last_synced_at')
+      .eq('item_type', 'debt')
+      .maybeSingle();
+    return data ?? null;
+  },
+
+  async syncDebtTransactions(force = false): Promise<SyncResult> {
+    const token = await getAuthToken();
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/sync-transactions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ force, item_type: 'debt' }),
+    });
+    const data = await response.json();
+    if (response.status === 429) {
+      throw Object.assign(new Error(data.message || 'Rate limited'), {
+        rateLimited: true,
+        retryAfterMinutes: data.retry_after_minutes ?? null,
+        lastSyncedAt: data.last_synced_at ?? null,
+      });
+    }
+    if (!response.ok) throw new Error(data.error || 'Failed to sync debt transactions');
+    return {
+      synced: data.synced ?? 0,
+      removed: data.removed ?? 0,
+      last_synced_at: data.last_synced_at,
+    };
   },
 };

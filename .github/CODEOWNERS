@@ -1,0 +1,24 @@
+# Require review from the project lead for sensitive areas.
+# GitHub applies the most specific matching rule — patterns later in the file take precedence.
+
+# Default owner for everything
+*                                      @Echopraxic
+
+# Database migrations — any schema or RLS change needs lead sign-off
+supabase/migrations/                   @Echopraxic
+
+# Edge Functions — server-side secrets and payment logic
+supabase/functions/                    @Echopraxic
+
+# Auth and payment-adjacent UI
+app/(auth)/                            @Echopraxic
+app/(tabs)/wallet.tsx                  @Echopraxic
+
+# Security and compliance documentation
+SECURITY_POLICY.md                     @Echopraxic
+PRIVACY_POLICY.md                      @Echopraxic
+DATA_RETENTION_POLICY.md               @Echopraxic
+CONSENT_MANAGEMENT.md                  @Echopraxic
+MONEY_TRANSMISSION_COMPLIANCE.md       @Echopraxic
+RLS_AUDIT_REPORT.md                    @Echopraxic
+PLAID_WEBVIEW_SECURITY.md              @Echopraxic

@@ -511,28 +511,41 @@ User is disqualified if:
 
 ### Task Completion Flow
 
-1. User opens task detail screen
-2. System shows completion guidance & anti-gaming rules
-3. User completes the requirement (manually or auto-verified)
-4. System verifies completion:
-   - Automatic tasks: Real-time via bank APIs
-   - Manual tasks: User submits proof or confirmation
-5. Task marked complete, points awarded, totals update
-6. Leaderboard updates in real-time
+Tasks have two independent fields that control appearance and behavior:
+
+- **`task_type`** — color-coding only (`savings` = violet, `no_spend` = lime green, etc.)
+- **`verification_type`** — determines which completion modal opens and what DB writes occur
+
+When a user taps a task:
+
+```
+no_spend_declare → category picker (3 Plaid categories)
+plaid            → verifyTaskCompletion() checks bank_transactions / plaid_accounts
+photo            → image picker → upload to task-evidence storage
+form             → FormModal with one of 7 form types (identified by form_id)
+quiz             → QuizModal renders quiz from lib/quizzes.ts registry
+counter          → CounterModal with +/- buttons; progress saved after each tap
+text             → TextEntryModal with live word count
+self_report      → confirm modal; no external check
+```
 
 ### Real-Time Features
 
 - Points update immediately upon task completion
 - Leaderboard reflects changes within seconds
-- Streak counters update daily at midnight
-- Disqualification applies immediately upon trigger event
+- Streak counters evaluated daily via pg_cron
+- Debt spending freeze violations detected via Plaid webhook (>$50 purchase breaks streak)
 
 ### Database Tracking
 
-- `challenge_participants`: points, is_disqualified, disqualification_reason, dropped_out_at (soft-delete timestamp)
-- `task_completions`: completed_at timestamp
-- `transactions`: deposit/withdrawal tracking
-- `spending_logs`: daily spending entries (for tracking tasks)
+- `challenge_participants`: points, is_disqualified, disqualification_reason, dropped_out_at
+- `task_completions`: completed_at, evidence_url (photos)
+- `task_form_submissions`: jsonb form_data per submission
+- `task_quiz_submissions`: answers jsonb, score, profile_label
+- `task_counters`: single count row per user per task; upserted on every +/- tap
+- `task_text_submissions`: full text content, word_count
+- `plaid_accounts`: current_balance per linked account; refreshed after every debt sync
+- `bank_transactions`: all Plaid transactions; stamped with item_type (savings or debt)
 
 ---
 

@@ -12,12 +12,23 @@ export type TaskType =
   | 'negotiation'
   | 'custom';
 
+export type VerificationType =
+  | 'plaid'
+  | 'photo'
+  | 'self_report'
+  | 'form'
+  | 'quiz'
+  | 'counter'
+  | 'text';
+
 export interface PresetTask {
   title: string;
   description: string;
   points: number;
   is_mandatory: boolean;
   task_type: TaskType;
+  verification_type: VerificationType;
+  form_id?: string;
 }
 
 export interface PresetChallenge {
@@ -41,6 +52,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 20,
         is_mandatory: true,
         task_type: 'savings',
+        verification_type: 'self_report',
       },
       {
         title: 'Set Emergency Fund Goal',
@@ -48,6 +60,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 10,
         is_mandatory: true,
         task_type: 'savings',
+        verification_type: 'self_report',
       },
       {
         title: 'Deposit at Least $25',
@@ -55,6 +68,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 20,
         is_mandatory: true,
         task_type: 'savings',
+        verification_type: 'plaid',
       },
       {
         title: 'Deposit at Least $100 Total',
@@ -62,6 +76,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 40,
         is_mandatory: true,
         task_type: 'savings',
+        verification_type: 'plaid',
       },
       {
         title: 'Deposit at Least $250 Total',
@@ -69,6 +84,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 60,
         is_mandatory: true,
         task_type: 'savings',
+        verification_type: 'plaid',
       },
       {
         title: '7-Day Expense Tracking Streak',
@@ -76,6 +92,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 30,
         is_mandatory: false,
         task_type: 'tracking',
+        verification_type: 'plaid',
       },
       {
         title: 'Cancel One Subscription',
@@ -83,6 +100,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 25,
         is_mandatory: false,
         task_type: 'subscription',
+        verification_type: 'photo',
       },
       {
         title: 'Automate Weekly Transfer',
@@ -90,6 +108,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 40,
         is_mandatory: false,
         task_type: 'savings',
+        verification_type: 'self_report',
       },
       {
         title: 'Watch Savings Fundamentals Lesson',
@@ -97,6 +116,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 20,
         is_mandatory: false,
         task_type: 'reading',
+        verification_type: 'self_report',
       },
       {
         title: '14-Day No-Impulse-Buy Streak',
@@ -104,6 +124,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: false,
         task_type: 'no_spend',
+        verification_type: 'plaid',
       },
     ],
   },
@@ -113,13 +134,13 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
     duration_days: 30,
     buy_in_amount: 25.00,
     tasks: [
-      // Mandatory
       {
         title: 'Connect Debt Account',
         description: 'Link your credit card or loan account via Plaid to enable balance monitoring',
         points: 25,
         is_mandatory: true,
         task_type: 'savings',
+        verification_type: 'self_report',
       },
       {
         title: 'Calculate Interest Cost',
@@ -127,6 +148,8 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 15,
         is_mandatory: true,
         task_type: 'budget',
+        verification_type: 'form',
+        form_id: 'apr_calculator',
       },
       {
         title: 'Pay $100 Toward Debt',
@@ -134,6 +157,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 30,
         is_mandatory: true,
         task_type: 'debt_payment',
+        verification_type: 'plaid',
       },
       {
         title: 'Pay $500 Total Toward Debt',
@@ -141,6 +165,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 50,
         is_mandatory: true,
         task_type: 'debt_payment',
+        verification_type: 'plaid',
       },
       {
         title: 'Pay Off One Debt Completely',
@@ -148,14 +173,15 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 100,
         is_mandatory: true,
         task_type: 'debt_payment',
+        verification_type: 'plaid',
       },
-      // Optional
       {
         title: '21-Day Spending Freeze Streak',
         description: 'Zero discretionary spending for 21 consecutive days',
         points: 40,
         is_mandatory: false,
         task_type: 'no_spend',
+        verification_type: 'plaid',
       },
       {
         title: 'Negotiate Lower APR',
@@ -163,6 +189,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: false,
         task_type: 'subscription',
+        verification_type: 'photo',
       },
       {
         title: 'Side Hustle $200+',
@@ -170,6 +197,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 50,
         is_mandatory: false,
         task_type: 'custom',
+        verification_type: 'photo',
       },
       {
         title: 'Cut 3 Monthly Bills',
@@ -177,6 +205,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 30,
         is_mandatory: false,
         task_type: 'subscription',
+        verification_type: 'photo',
       },
       {
         title: 'Debt Avalanche Calculation',
@@ -184,6 +213,8 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 25,
         is_mandatory: false,
         task_type: 'budget',
+        verification_type: 'form',
+        form_id: 'debt_avalanche',
       },
       {
         title: 'No-New-Debt 30 Days',
@@ -191,6 +222,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 45,
         is_mandatory: false,
         task_type: 'custom',
+        verification_type: 'self_report',
       },
     ],
   },
@@ -200,13 +232,14 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
     duration_days: 30,
     buy_in_amount: 20.00,
     tasks: [
-      // Mandatory
       {
         title: 'Complete Risk Assessment Quiz',
         description: 'Answer 10 questions about your risk tolerance to determine your investment profile',
         points: 20,
         is_mandatory: true,
         task_type: 'reading',
+        verification_type: 'quiz',
+        form_id: 'risk_assessment',
       },
       {
         title: 'Open Investment Account',
@@ -214,6 +247,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 30,
         is_mandatory: true,
         task_type: 'custom',
+        verification_type: 'photo',
       },
       {
         title: 'Connect Investment Account',
@@ -221,6 +255,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 25,
         is_mandatory: true,
         task_type: 'savings',
+        verification_type: 'self_report',
       },
       {
         title: 'Set Investment Goal',
@@ -228,6 +263,8 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 15,
         is_mandatory: true,
         task_type: 'budget',
+        verification_type: 'form',
+        form_id: 'investment_goal',
       },
       {
         title: 'Invest $100 Initial',
@@ -235,6 +272,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: true,
         task_type: 'investment',
+        verification_type: 'photo',
       },
       {
         title: 'Automate Monthly Contribution',
@@ -242,6 +280,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 50,
         is_mandatory: true,
         task_type: 'investment',
+        verification_type: 'photo',
       },
       {
         title: 'Invest $300 Total',
@@ -249,14 +288,15 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 60,
         is_mandatory: true,
         task_type: 'investment',
+        verification_type: 'photo',
       },
-      // Optional
       {
         title: 'Read "Investing 101" Lesson',
         description: 'Complete the educational module and quiz on investment fundamentals',
         points: 25,
         is_mandatory: false,
         task_type: 'reading',
+        verification_type: 'self_report',
       },
       {
         title: 'Research & Select 3 ETFs',
@@ -264,6 +304,8 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 30,
         is_mandatory: false,
         task_type: 'reading',
+        verification_type: 'form',
+        form_id: 'etf_research',
       },
       {
         title: '30-Day Market News Fast',
@@ -271,6 +313,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: false,
         task_type: 'custom',
+        verification_type: 'self_report',
       },
       {
         title: 'Increase Auto-Contribution to $100',
@@ -278,6 +321,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 40,
         is_mandatory: false,
         task_type: 'investment',
+        verification_type: 'photo',
       },
       {
         title: 'Invest $600 Total',
@@ -285,6 +329,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 50,
         is_mandatory: false,
         task_type: 'investment',
+        verification_type: 'photo',
       },
       {
         title: 'Join Investment Community Discussion',
@@ -292,6 +337,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 20,
         is_mandatory: false,
         task_type: 'custom',
+        verification_type: 'text',
       },
       {
         title: 'Calculate Compound Growth Projection',
@@ -299,6 +345,8 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 25,
         is_mandatory: false,
         task_type: 'budget',
+        verification_type: 'form',
+        form_id: 'compound_growth',
       },
     ],
   },
@@ -308,13 +356,14 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
     duration_days: 30,
     buy_in_amount: 15.00,
     tasks: [
-      // Mandatory
       {
         title: 'Complete Bill Audit Worksheet',
         description: 'List all recurring bills with provider names, current rates, and contract end dates (5+ bills required)',
         points: 20,
         is_mandatory: true,
         task_type: 'budget',
+        verification_type: 'form',
+        form_id: 'bill_audit',
       },
       {
         title: 'Research Market Rates',
@@ -322,6 +371,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 25,
         is_mandatory: true,
         task_type: 'reading',
+        verification_type: 'photo',
       },
       {
         title: 'Script Your First Call',
@@ -329,6 +379,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 15,
         is_mandatory: true,
         task_type: 'custom',
+        verification_type: 'text',
       },
       {
         title: 'Make First Negotiation Call',
@@ -336,6 +387,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: true,
         task_type: 'negotiation',
+        verification_type: 'photo',
       },
       {
         title: 'Secure First Win',
@@ -343,6 +395,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 50,
         is_mandatory: true,
         task_type: 'negotiation',
+        verification_type: 'photo',
       },
       {
         title: 'Negotiate Second Bill',
@@ -350,6 +403,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 40,
         is_mandatory: true,
         task_type: 'negotiation',
+        verification_type: 'photo',
       },
       {
         title: 'Document Total Annual Savings',
@@ -357,14 +411,16 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 45,
         is_mandatory: true,
         task_type: 'budget',
+        verification_type: 'form',
+        form_id: 'annual_savings',
       },
-      // Optional
       {
         title: 'Negotiate Third Bill',
         description: 'Call an additional provider and upload confirmation of savings',
         points: 45,
         is_mandatory: false,
         task_type: 'negotiation',
+        verification_type: 'photo',
       },
       {
         title: 'Threaten to Cancel (Retention Dept)',
@@ -372,6 +428,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 30,
         is_mandatory: false,
         task_type: 'negotiation',
+        verification_type: 'photo',
       },
       {
         title: 'Switch Providers for Better Rate',
@@ -379,6 +436,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 50,
         is_mandatory: false,
         task_type: 'subscription',
+        verification_type: 'photo',
       },
       {
         title: 'Negotiate Annual Payment Discount',
@@ -386,6 +444,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: false,
         task_type: 'negotiation',
+        verification_type: 'photo',
       },
       {
         title: '7-Day Call Streak',
@@ -393,6 +452,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 40,
         is_mandatory: false,
         task_type: 'custom',
+        verification_type: 'self_report',
       },
     ],
   },
@@ -408,6 +468,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 20,
         is_mandatory: true,
         task_type: 'no_spend_declare',
+        verification_type: 'self_report',
       },
       {
         title: '7-Day No-Spend Streak',
@@ -415,6 +476,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 40,
         is_mandatory: true,
         task_type: 'no_spend',
+        verification_type: 'plaid',
       },
       {
         title: '14-Day No-Spend Streak',
@@ -422,6 +484,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 60,
         is_mandatory: true,
         task_type: 'no_spend',
+        verification_type: 'plaid',
       },
       {
         title: 'Cook at Home 10 Times',
@@ -429,6 +492,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 30,
         is_mandatory: false,
         task_type: 'cooking',
+        verification_type: 'counter',
       },
       {
         title: 'Replace Purchase with Free Alternative',
@@ -436,6 +500,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 25,
         is_mandatory: false,
         task_type: 'custom',
+        verification_type: 'self_report',
       },
       {
         title: 'Track Every Purchase for 21 Days',
@@ -443,6 +508,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 40,
         is_mandatory: false,
         task_type: 'tracking',
+        verification_type: 'plaid',
       },
       {
         title: 'Save at Least $150 During Challenge',
@@ -450,6 +516,7 @@ export const PRESET_CHALLENGES: PresetChallenge[] = [
         points: 35,
         is_mandatory: false,
         task_type: 'savings',
+        verification_type: 'plaid',
       },
     ],
   },

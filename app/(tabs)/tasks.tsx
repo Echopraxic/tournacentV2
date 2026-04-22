@@ -21,6 +21,10 @@ import { useScalePress } from '@/hooks/animations/useScalePress';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { verifyTaskCompletion } from '@/lib/task-verification';
 import { CheckCircle2, Circle, AlertTriangle, Upload, ImageIcon, Check } from 'lucide-react-native';
+import { FormModal } from '@/components/FormModal';
+import { QuizModal } from '@/components/QuizModal';
+import { CounterModal, parseCounterTarget } from '@/components/CounterModal';
+import { TextEntryModal } from '@/components/TextEntryModal';
 
 interface Task {
   id: string;
@@ -29,6 +33,8 @@ interface Task {
   points: number;
   is_mandatory: boolean;
   task_type: string;
+  verification_type: string;
+  form_id: string | null;
   completed: boolean;
 }
 
@@ -58,10 +64,12 @@ function SwipeableTaskCard({
   task,
   onPress,
   getTaskTypeColor,
+  counterProgress,
 }: {
   task: Task;
   onPress: (task: Task) => void;
   getTaskTypeColor: (type: string) => string;
+  counterProgress?: { current: number; target: number };
 }) {
   const { theme } = useTheme();
   const { gesture, animatedStyle, underlayStyle } = useSwipeAction({
@@ -129,6 +137,26 @@ function SwipeableTaskCard({
                       {task.task_type}
                     </Text>
                   </View>
+                  {counterProgress && !task.completed && (
+                    <View style={styles.counterProgressRow}>
+                      <View style={styles.counterProgressTrack}>
+                        <View
+                          style={[
+                            styles.counterProgressFill,
+                            {
+                              width: `${Math.min(
+                                (counterProgress.current / counterProgress.target) * 100,
+                                100
+                              )}%` as any,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.counterProgressLabel}>
+                        {counterProgress.current} / {counterProgress.target}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
               <View
@@ -196,10 +224,16 @@ export default function Tasks() {
   const [modalVisible, setModalVisible] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const [evidenceUri, setEvidenceUri] = useState<string | null>(null);
+  const [evidenceMime, setEvidenceMime] = useState<string>('image/jpeg');
   const [uploading, setUploading] = useState(false);
   const [isDroppedOut, setIsDroppedOut] = useState(false);
   const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [formModalVisible, setFormModalVisible] = useState(false);
+  const [quizModalVisible, setQuizModalVisible] = useState(false);
+  const [counterModalVisible, setCounterModalVisible] = useState(false);
+  const [counterMap, setCounterMap] = useState<Record<string, number>>({});
+  const [textModalVisible, setTextModalVisible] = useState(false);
 
   const fetchTasks = async () => {
     if (!user) return;
@@ -262,6 +296,20 @@ export default function Tasks() {
         setTasks(tasksWithCompletion);
         setCompletedCount(completedIds.size);
 
+        const counterTaskIds = tasksData
+          ?.filter(t => t.verification_type === 'counter')
+          .map(t => t.id) ?? [];
+        if (counterTaskIds.length > 0) {
+          const { data: countersData } = await supabase
+            .from('task_counters')
+            .select('task_id, count')
+            .eq('user_id', user.id)
+            .in('task_id', counterTaskIds);
+          const map: Record<string, number> = {};
+          countersData?.forEach(c => { map[c.task_id] = c.count; });
+          setCounterMap(map);
+        }
+
         const max = tasksData?.reduce((sum, task) => sum + task.points, 0) || 0;
         setMaxPoints(max);
       }
@@ -294,6 +342,18 @@ export default function Tasks() {
         setSelectedTask(task);
         setSelectedCategories([]);
         setCategoryPickerVisible(true);
+      } else if (task.verification_type === 'form') {
+        setSelectedTask(task);
+        setFormModalVisible(true);
+      } else if (task.verification_type === 'quiz') {
+        setSelectedTask(task);
+        setQuizModalVisible(true);
+      } else if (task.verification_type === 'counter') {
+        setSelectedTask(task);
+        setCounterModalVisible(true);
+      } else if (task.verification_type === 'text') {
+        setSelectedTask(task);
+        setTextModalVisible(true);
       } else {
         setSelectedTask(task);
         setEvidenceUri(null);
@@ -361,7 +421,16 @@ export default function Tasks() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      setEvidenceUri(result.assets[0].uri);
+      const asset = result.assets[0];
+      const mime = asset.mimeType ?? 'image/jpeg';
+      const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
+      if (!ALLOWED_IMAGE_TYPES.includes(mime.toLowerCase())) {
+        setFeedback({ message: 'Only JPEG, PNG, HEIC, or WebP images are allowed.', isError: true });
+        setTimeout(() => setFeedback(null), 3000);
+        return;
+      }
+      setEvidenceUri(asset.uri);
+      setEvidenceMime(mime);
     }
   };
 
@@ -372,7 +441,7 @@ export default function Tasks() {
     const path = `${user.id}/${taskId}`;
     const { error } = await supabase.storage
       .from('task-evidence')
-      .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+      .upload(path, blob, { contentType: evidenceMime, upsert: true });
     if (error) throw error;
     return path;
   };
@@ -382,10 +451,9 @@ export default function Tasks() {
     setUploading(true);
 
     try {
-      // Run Plaid-backed verification for savings, no-spend, and tracking tasks
-      // no_spend_declare is handled separately by handleDeclareCategories
-      const plaidVerifiedTypes = ['savings', 'no_spend', 'tracking'];
-      if (plaidVerifiedTypes.includes(selectedTask.task_type)) {
+      // Run Plaid-backed verification for tasks with verification_type 'plaid'.
+      // no_spend_declare is handled separately by handleDeclareCategories.
+      if (selectedTask.verification_type === 'plaid') {
         const verification = await verifyTaskCompletion(
           user.id,
           selectedTask.id,
@@ -403,7 +471,7 @@ export default function Tasks() {
       }
 
       let evidenceStoragePath: string | null = null;
-      if (['subscription', 'negotiation'].includes(selectedTask.task_type)) {
+      if (selectedTask.verification_type === 'photo') {
         evidenceStoragePath = await uploadEvidence(selectedTask.id);
       }
 
@@ -594,6 +662,14 @@ export default function Tasks() {
             task={task}
             onPress={handleTaskPress}
             getTaskTypeColor={getTaskTypeColor}
+            counterProgress={
+              task.verification_type === 'counter'
+                ? {
+                    current: counterMap[task.id] ?? 0,
+                    target: parseCounterTarget(task.title),
+                  }
+                : undefined
+            }
           />
         ))}
       </ScrollView>
@@ -661,6 +737,86 @@ export default function Tasks() {
         </View>
       </Modal>
 
+      <FormModal
+        visible={formModalVisible}
+        task={selectedTask}
+        challengeId={challengeId ?? ''}
+        userId={user?.id ?? ''}
+        totalPoints={totalPoints}
+        onClose={() => {
+          setFormModalVisible(false);
+          setSelectedTask(null);
+        }}
+        onComplete={(points) => {
+          setFormModalVisible(false);
+          setSelectedTask(null);
+          setFeedback({ message: `Task completed! +${points} points`, isError: false });
+          setTimeout(() => setFeedback(null), 3000);
+          fetchTasks();
+        }}
+      />
+
+      <QuizModal
+        visible={quizModalVisible}
+        task={selectedTask}
+        challengeId={challengeId ?? ''}
+        userId={user?.id ?? ''}
+        totalPoints={totalPoints}
+        onClose={() => {
+          setQuizModalVisible(false);
+          setSelectedTask(null);
+        }}
+        onComplete={(points) => {
+          setQuizModalVisible(false);
+          setSelectedTask(null);
+          setFeedback({ message: `Task completed! +${points} points`, isError: false });
+          setTimeout(() => setFeedback(null), 3000);
+          fetchTasks();
+        }}
+      />
+
+      <CounterModal
+        visible={counterModalVisible}
+        task={selectedTask}
+        challengeId={challengeId ?? ''}
+        userId={user?.id ?? ''}
+        totalPoints={totalPoints}
+        initialCount={selectedTask ? (counterMap[selectedTask.id] ?? 0) : 0}
+        onClose={() => {
+          setCounterModalVisible(false);
+          setSelectedTask(null);
+        }}
+        onComplete={(points) => {
+          setCounterModalVisible(false);
+          setSelectedTask(null);
+          setFeedback({ message: `Task completed! +${points} points`, isError: false });
+          setTimeout(() => setFeedback(null), 3000);
+          fetchTasks();
+        }}
+        onCounterUpdate={(taskId, count) => {
+          setCounterMap(prev => ({ ...prev, [taskId]: count }));
+        }}
+      />
+
+      <TextEntryModal
+        visible={textModalVisible}
+        task={selectedTask}
+        challengeId={challengeId ?? ''}
+        userId={user?.id ?? ''}
+        totalPoints={totalPoints}
+        onClose={() => {
+          setTextModalVisible(false);
+          setSelectedTask(null);
+        }}
+        onComplete={(points) => {
+          setTextModalVisible(false);
+          setSelectedTask(null);
+          setFeedback({ message: `Task completed! +${points} points`, isError: false });
+          setTimeout(() => setFeedback(null), 3000);
+          fetchTasks();
+        }}
+      />
+
       <Modal
         animationType="slide"
         transparent={true}
@@ -669,11 +825,11 @@ export default function Tasks() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {['subscription', 'negotiation'].includes(selectedTask?.task_type ?? '') ? (
+            {selectedTask?.verification_type === 'photo' ? (
               <>
-                <Text style={styles.modalTitle}>Upload Cancellation Proof</Text>
+                <Text style={styles.modalTitle}>Upload Evidence</Text>
                 <Text style={styles.modalDescription}>
-                  Upload a screenshot of your cancellation confirmation email to verify this task.
+                  {selectedTask?.description}
                 </Text>
 
                 <TouchableOpacity style={styles.uploadArea} onPress={handlePickEvidence}>
@@ -1057,6 +1213,31 @@ const styles = StyleSheet.create({
     color: '#10B981',
     textAlign: 'center',
     marginTop: -4,
+  },
+  counterProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  counterProgressTrack: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  counterProgressFill: {
+    height: '100%',
+    backgroundColor: '#F59E0B',
+    borderRadius: 2,
+  },
+  counterProgressLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6B7280',
+    minWidth: 32,
+    textAlign: 'right',
   },
   categoryCount: {
     fontSize: 14,

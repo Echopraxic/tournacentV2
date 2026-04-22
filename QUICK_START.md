@@ -8,7 +8,7 @@
 - Node.js 18+
 - Expo CLI (`npm install -g expo-cli`)
 - EAS CLI (`npm install -g eas-cli`) — for APK builds
-- Supabase CLI at `/tmp/supabase.exe` (Windows) — see README for install
+- Supabase CLI at `/tmp/supabase.exe` (Windows)
 
 ### 1. Install dependencies
 ```bash
@@ -33,8 +33,6 @@ In [Supabase Dashboard](https://supabase.com/dashboard) → Authentication → S
 - Uncheck **"Enable email confirmations"**
 - Save
 
-Without this, users who sign up can't log in (the app expects an immediate session).
-
 ### 5. Start the dev server
 ```bash
 node_modules/.bin/expo.cmd start --web --port 8081
@@ -42,14 +40,34 @@ node_modules/.bin/expo.cmd start --web --port 8081
 
 ---
 
+## Plaid Setup (for bank verification tasks)
+
+```bash
+# 1. Set secrets in Supabase Dashboard → Edge Functions → Secrets
+PLAID_CLIENT_ID=<from dashboard.plaid.com>
+PLAID_SECRET=<sandbox secret>
+PLAID_ENV=sandbox
+
+# 2. Deploy functions
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy create-link-token
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy exchange-token
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy sync-transactions
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy plaid-webhook
+
+# 3. Test with sandbox credentials
+# Bank: "Chase", User: user_good, Password: pass_good
+```
+
+---
+
 ## Building an APK (Android Tester Build)
 
 ```bash
-eas login          # login with your Expo account
+eas login
 eas build --platform android --profile preview
 ```
 
-This produces a `.apk` file testers can sideload directly (no Play Store needed).
+Produces a `.apk` file testers can sideload directly.
 
 ---
 
@@ -58,55 +76,50 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 ### Sign Up
 1. Open app → tap "Create Account"
 2. Enter display name, email, password
-3. App logs you in immediately (requires email confirmation disabled — see above)
+3. App logs in immediately (requires email confirmation disabled — see above)
 
 ### Browse Challenges
 1. Home screen shows "No Active Challenge" on first login
 2. Tap **Browse Challenges**
-3. Five preset challenges appear: "30-Day Emergency Fund Sprint", "No-Spend Reset Challenge", "Debt Destroyer Sprint", "Investment Starter Challenge", and "Bill Negotiation Blitz"
+3. Five preset challenges appear
 4. Tap a challenge to open the selection modal
 
 ### Solo Challenge
-1. In the modal, tap **Solo**
-2. Challenge starts immediately — no waiting
-3. Home screen shows active challenge with countdown, prize pool, and tasks
+1. Tap **Solo**
+2. Challenge starts immediately
+3. Home screen shows active challenge with countdown and tasks
 
 ### Group Challenge
-1. In the modal, tap **Group**
-2. Confirm you understand 3 players are needed
-3. Invite code generated (e.g. `TC-A3KP`)
-4. Tap **Share Invite** → OS share sheet opens
-5. Send to friends via SMS, Snapchat, Instagram, Email
-6. Home shows "Waiting for Players" (X/3) with 48h countdown
-7. When 3rd person joins → challenge auto-activates
-
-### Friend Joins via Invite
-1. Friend receives link: `https://tournacent.app/join/TC-XXXX`
-2. If app installed: opens `join/[code].tsx` screen directly
-3. If not installed: App Store / Play Store link (placeholder until published)
-4. Friend creates account (if needed) → joins challenge
-
-### Buy-In (After Group Activates)
-1. Home shows "Buy-In Required" banner
-2. Wallet tab also shows buy-in prompt with deadline countdown
-3. Tap **Confirm Buy-In** → payment marked as paid (simulated — no real charge)
-4. Prize pool increments by buy-in amount
-5. Transaction record added to history
+1. Tap **Group** → confirm 3-player minimum
+2. Invite code generated (e.g. `TC-A3KP`)
+3. Tap **Share Invite** → OS share sheet opens
+4. Home shows "Waiting for Players" with 48h countdown
+5. When 3rd player joins → challenge auto-activates
 
 ### Complete Tasks
-1. Go to **Tasks** tab
-2. Tap any incomplete task
-3. Tap **Complete Task**
-4. Points added to your total
-5. Leaderboard updates
+Go to **Tasks** tab. Each task opens a different completion flow based on its `verification_type`:
+
+| Verification Type | What happens |
+|-------------------|-------------|
+| `self_report` | Confirm modal → complete |
+| `plaid` | App checks your linked bank data automatically |
+| `photo` | Image picker → upload screenshot as proof |
+| `form` | In-app form (calculator, list builder, etc.) → compute results → submit |
+| `quiz` | Answer all 10 questions → see your investment profile → submit |
+| `counter` | Tap + each time you complete the action → upload photo at target → complete |
+| `text` | Type your response (word count shown live) → submit |
+
+Tasks also support swipe-right to trigger their completion flow.
+
+### No-Spend Declaration (No-Spend Reset Challenge)
+- Tapping the "Declare 3 Spending Categories" task opens a category picker
+- Select exactly 3 Plaid spending categories to avoid
+- Any purchase in those categories detected via bank feed will break your streak
 
 ### Drop Out
-- On Home screen, tap **Drop Out** (available in pending, buy-in, and active states)
-- Inline confirmation appears (no popup)
-- Confirm → participation record stamped with `dropped_out_at` (soft-delete, not deleted)
-- Home screen resets to "No Active Challenge"
-- Dropped-out player appears on the leaderboard with a grey "Dropped Out" badge
-- Re-joining the same challenge via the invite link is blocked
+- Tap **Drop Out** on Home screen
+- Inline confirmation (no popup)
+- Soft-deleted: `dropped_out_at` timestamp set; cannot rejoin
 
 ---
 
@@ -118,8 +131,8 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 | Duration | 30 days |
 | Buy-In | $10.00 |
 | Goal | Build $250+ emergency savings |
-| Mandatory Tasks | 5 progressive deposit milestones |
-| Optional Tasks | 5 savings/tracking/no-spend tasks |
+| Mandatory Tasks | 5 progressive Plaid-verified deposit milestones |
+| Optional Tasks | 5 tasks (tracking, subscription, no-spend, education) |
 
 ### No-Spend Reset Challenge
 | | |
@@ -127,8 +140,8 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 | Duration | 21 days |
 | Buy-In | $5.00 |
 | Goal | Reduce spending, save $150+ |
-| Mandatory Tasks | Declare categories + 7 and 14-day streaks |
-| Optional Tasks | 4 cooking/tracking/savings tasks |
+| Mandatory Tasks | Declare categories + 7-day and 14-day streaks (Plaid-verified) |
+| Optional Tasks | 4 tasks: counter (cooking), self-report, plaid (tracking + savings) |
 
 ### Debt Destroyer Sprint
 | | |
@@ -136,8 +149,8 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 | Duration | 30 days |
 | Buy-In | $25.00 |
 | Goal | Pay $500+ toward debt; eliminate one debt |
-| Mandatory Tasks | 5 debt payment milestones |
-| Optional Tasks | 6 spending/income/credit tasks |
+| Mandatory Tasks | Connect debt account, form (APR calculator), 3 Plaid payment milestones |
+| Optional Tasks | 6 tasks: spending freeze, photo uploads, form (debt avalanche), self-report |
 
 ### Investment Starter Challenge
 | | |
@@ -145,8 +158,8 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 | Duration | 30 days |
 | Buy-In | $20.00 |
 | Goal | Open account, invest $300+, automate contributions |
-| Mandatory Tasks | 7 account opening and investment milestones |
-| Optional Tasks | 7 education, research, and growth tasks |
+| Mandatory Tasks | Quiz (risk assessment), photo, self-report, form (investment goal), 3 photo milestones |
+| Optional Tasks | 7 tasks: self-report, form (ETF research + compound growth), text (community discussion) |
 
 ### Bill Negotiation Blitz
 | | |
@@ -154,17 +167,15 @@ This produces a `.apk` file testers can sideload directly (no Play Store needed)
 | Duration | 30 days |
 | Buy-In | $15.00 |
 | Goal | Negotiate 2+ bills, document $100+ in annual savings |
-| Mandatory Tasks | 7 bill audit, call, and win milestones |
-| Optional Tasks | 5 escalation, switching, and streak tasks |
+| Mandatory Tasks | Form (bill audit), photo (market rates), text (negotiation script), photo (calls + wins), form (annual savings) |
+| Optional Tasks | 5 tasks: photo (additional calls), self-report (streak) |
 
 ---
 
 ## Invite Code Format
 
-Codes use the format `TC-XXXX` where each character is from: `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`
-(Ambiguous characters 0, O, 1, I, L omitted to prevent confusion.)
-
-Example: `TC-A3KP`, `TC-ZMR7`
+Codes: `TC-XXXX` — characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`
+(0, O, 1, I, L omitted to prevent confusion.)
 
 ---
 
@@ -173,10 +184,10 @@ Example: `TC-A3KP`, `TC-ZMR7`
 | Issue | Workaround |
 |-------|-----------|
 | Signup doesn't navigate after submit | Disable email confirmation in Supabase Auth settings |
-| "Connect Bank" button fails | Plaid edge functions not deployed yet |
+| Bank-verified tasks fail | Set Plaid secrets and deploy edge functions |
 | Buy-in doesn't charge real money | Intentional — simulated for testing |
-| Pending challenges don't auto-cancel | Server-side cron not implemented; manual cleanup needed |
-| App Store/Play Store links in invites don't work | App not yet published; placeholder URLs |
+| Pending challenges don't auto-cancel | Server-side cron not implemented |
+| App Store/Play Store links in invites don't work | App not yet published |
 
 ---
 
@@ -188,4 +199,4 @@ Example: `TC-A3KP`, `TC-ZMR7`
 | `npm run typecheck` | TypeScript check |
 | `eas build --platform android --profile preview` | Build sideloadable APK |
 | `SUPABASE_ACCESS_TOKEN=x /tmp/supabase.exe db push` | Push DB migrations |
-| `supabase functions deploy <name>` | Deploy edge function |
+| `SUPABASE_ACCESS_TOKEN=x /tmp/supabase.exe functions deploy <name>` | Deploy edge function |

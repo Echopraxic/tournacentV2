@@ -525,13 +525,15 @@ For these tasks, users manually log:
 
 ### Verification Methods
 
-| Verification Type | Task | API/Tool |
-|-------------------|------|----------|
-| Real-time bank feed | Deposits, no-spend streaks, savings goal, debt payments, investment contributions | Plaid |
-| Manual logging | Expense/spending tracking, interest calculation, debt avalanche, investment goals, ETF research, bill audit, negotiation scripts | In-app form |
-| Photo/proof | Subscription cancellation, APR negotiation, bill cuts, side hustle, investment account opening, negotiation call logs, win confirmations, provider switches | User upload |
-| Automatic count | Cooked meals, recurring investment transfers | In-app logging |
-| In-app quiz | Risk assessment | Auto-graded |
+| `verification_type` | Tasks | How it works |
+|---------------------|-------|-------------|
+| `plaid` | Deposit milestones, no-spend streaks, debt payments, savings goal | `lib/task-verification.ts` reads `bank_transactions`; debt balance from `plaid_accounts` |
+| `photo` | Subscription cancellation, negotiation calls, investment account opening, side hustle, bill cuts, APR negotiation, provider switch | Image picker → upload to `task-evidence` storage |
+| `self_report` | Connect accounts, goal setting, recurring setup, education, no-new-debt | One-tap confirm |
+| `form` | APR calculator, debt avalanche, investment goal, ETF research, bill audit, annual savings, compound growth | `FormModal` with computed results before submit; saved to `task_form_submissions` |
+| `quiz` | Risk assessment | `QuizModal` — 10 questions, auto-scored, profile displayed before submit; saved to `task_quiz_submissions` |
+| `counter` | Cook at Home 10 Times | `CounterModal` — +/- buttons, target from title, photo at target; saved to `task_counters` |
+| `text` | Script Your First Call, Join Investment Community Discussion | `TextEntryModal` — live word count, minimum from description; saved to `task_text_submissions` |
 
 ---
 

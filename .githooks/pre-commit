@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Pre-commit hook: blocks commits that contain high-entropy secrets or known key patterns.
+# Install: git config core.hooksPath .githooks
+#          (or run: npm run prepare)
+
+set -euo pipefail
+
+# Patterns that should never appear in committed files
+PATTERNS=(
+  'service_role'
+  'SUPABASE_SERVICE_ROLE_KEY'
+  'PLAID_SECRET[^_]'
+  'PLAID_ENCRYPTION_KEY'
+  'access-token.*=.*[A-Za-z0-9+/]{20}'
+  'private_key'
+  'BEGIN RSA PRIVATE KEY'
+  'BEGIN EC PRIVATE KEY'
+  'sk_live_'
+  'rk_live_'
+)
+
+# Files that are explicitly allowed to mention these patterns (docs, this hook itself)
+EXCLUDED_PATHS=(
+  '.githooks/'
+  'SECURITY_POLICY.md'
+  'DATA_RETENTION_POLICY.md'
+  'CONSENT_MANAGEMENT.md'
+  '*.md'
+)
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+build_exclude_args() {
+  local args=""
+  for path in "${EXCLUDED_PATHS[@]}"; do
+    args="$args --exclude=$path"
+  done
+  echo "$args"
+}
+
+EXCLUDE_ARGS=$(build_exclude_args)
+FOUND=0
+
+for pattern in "${PATTERNS[@]}"; do
+  # Search only staged content (not working tree)
+  while IFS= read -r file; do
+    # Skip excluded paths
+    skip=0
+    for excl in "${EXCLUDED_PATHS[@]}"; do
+      case "$file" in
+        $excl) skip=1; break ;;
+        *${excl%/}*) skip=1; break ;;
+      esac
+    done
+    [ "$skip" -eq 1 ] && continue
+
+    # Check staged content of this file for the pattern
+    if git show ":$file" 2>/dev/null | grep -qE "$pattern"; then
+      echo "  SECRET DETECTED in $file (pattern: $pattern)"
+      FOUND=1
+    fi
+  done <<< "$STAGED_FILES"
+done
+
+if [ "$FOUND" -eq 1 ]; then
+  echo ""
+  echo "Commit blocked: potential secrets found in staged files."
+  echo "Review the files above, remove the sensitive values, and try again."
+  echo "If this is a false positive, use: git commit --no-verify (use sparingly)"
+  exit 1
+fi
+
+exit 0

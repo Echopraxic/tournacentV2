@@ -12,13 +12,10 @@ const PLAID_BASE_URLS: Record<string, string> = {
 };
 const PLAID_BASE_URL = PLAID_BASE_URLS[PLAID_ENV] ?? 'https://sandbox.plaid.com';
 
-// Ignore webhook-triggered syncs if one ran within this window
-const DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
-
-// Minimum debit amount to trigger savings disqualification (matches task-verification.ts)
+const DEBOUNCE_MS = 5 * 60 * 1000;
 const SAVINGS_WITHDRAWAL_THRESHOLD = 15;
+const DEBT_PURCHASE_THRESHOLD = 50;
 
-// Webhook codes that mean new transaction data is available
 const TRANSACTION_WEBHOOK_CODES = new Set([
   'SYNC_UPDATES_AVAILABLE',
   'DEFAULT_UPDATE',
@@ -26,14 +23,137 @@ const TRANSACTION_WEBHOOK_CODES = new Set([
   'HISTORICAL_UPDATE',
 ]);
 
+// ── Encryption helpers ────────────────────────────────────────────────────────
+
+const ENC_PREFIX = 'enc:v1:';
+
+function b64Encode(bytes: Uint8Array): string {
+  let s = '';
+  bytes.forEach((b) => (s += String.fromCharCode(b)));
+  return btoa(s);
+}
+
+function b64Decode(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function getEncKey(): Promise<CryptoKey | null> {
+  const raw = Deno.env.get('PLAID_ENCRYPTION_KEY');
+  if (!raw) return null;
+  return crypto.subtle.importKey('raw', b64Decode(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+async function decryptAccessToken(stored: string, key: CryptoKey): Promise<string> {
+  if (!stored.startsWith(ENC_PREFIX)) return stored; // backwards-compat: plaintext
+  const combined = b64Decode(stored.slice(ENC_PREFIX.length));
+  const iv = combined.slice(0, 12);
+  const ct = combined.slice(12);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+  return new TextDecoder().decode(plain);
+}
+
+// ── Webhook signature verification ───────────────────────────────────────────
+
+async function sha256Hex(data: string): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function b64UrlDecode(s: string): Uint8Array {
+  return b64Decode(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(s.length + ((4 - (s.length % 4)) % 4), '='));
+}
+
+/**
+ * Verifies the Plaid-Verification JWT attached to incoming webhooks.
+ *
+ * Steps per Plaid docs:
+ * 1. Parse JWT header → get key_id
+ * 2. Fetch Plaid's public JWK for that key_id
+ * 3. Verify RS256 signature over header.payload
+ * 4. Verify SHA-256 of raw request body matches payload.request_body_sha256
+ * 5. Verify token is not older than 5 minutes
+ *
+ * In sandbox mode webhook verification is skipped (Plaid doesn't sign sandbox webhooks).
+ */
+async function verifyWebhookSignature(jwtToken: string, rawBody: string): Promise<boolean> {
+  const parts = jwtToken.split('.');
+  if (parts.length !== 3) return false;
+
+  try {
+    const header = JSON.parse(new TextDecoder().decode(b64UrlDecode(parts[0])));
+    const payload = JSON.parse(new TextDecoder().decode(b64UrlDecode(parts[1])));
+
+    // Fetch Plaid's verification key
+    const keyRes = await fetch(`${PLAID_BASE_URL}/webhook_verification_key/get`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: PLAID_CLIENT_ID, secret: PLAID_SECRET, key_id: header.kid }),
+    });
+    if (!keyRes.ok) return false;
+    const { key } = await keyRes.json();
+    if (!key) return false;
+
+    // Import JWK
+    const cryptoKey = await crypto.subtle.importKey(
+      'jwk',
+      key,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+
+    // Verify signature
+    const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = b64UrlDecode(parts[2]);
+    const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, sig, signed);
+    if (!valid) return false;
+
+    // Verify body hash
+    const bodyHash = await sha256Hex(rawBody);
+    if (bodyHash !== payload.request_body_sha256) return false;
+
+    // Verify freshness (5-minute window)
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.iat && now > payload.iat + 300) return false;
+
+    return true;
+  } catch (e) {
+    console.error('webhook signature verification error:', e);
+    return false;
+  }
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
+
 serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
+  const rawBody = await req.text();
+
+  // Verify Plaid webhook signature (skip in sandbox — Plaid doesn't sign sandbox webhooks)
+  if (PLAID_ENV !== 'sandbox') {
+    const jwtToken = req.headers.get('Plaid-Verification');
+    if (!jwtToken) {
+      console.error('plaid-webhook: missing Plaid-Verification header');
+      return new Response('Unauthorized', { status: 401 });
+    }
+    const valid = await verifyWebhookSignature(jwtToken, rawBody);
+    if (!valid) {
+      console.error('plaid-webhook: invalid webhook signature');
+      return new Response('Unauthorized', { status: 401 });
+    }
+  }
+
   let body: any;
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody);
   } catch {
     return new Response('Bad Request', { status: 400 });
   }
@@ -56,7 +176,7 @@ serve(async (req) => {
 
   const { data: plaidItem } = await supabase
     .from('plaid_items')
-    .select('user_id, access_token, cursor, last_synced_at')
+    .select('user_id, access_token, cursor, last_synced_at, item_type')
     .eq('item_id', itemId)
     .maybeSingle();
 
@@ -64,7 +184,6 @@ serve(async (req) => {
     return new Response('ok', { status: 200 });
   }
 
-  // Debounce: skip if a sync already ran within the last 5 minutes
   if (plaidItem.last_synced_at) {
     const msSinceLast = Date.now() - new Date(plaidItem.last_synced_at).getTime();
     if (msSinceLast < DEBOUNCE_MS) {
@@ -72,7 +191,6 @@ serve(async (req) => {
     }
   }
 
-  // Only sync if the user is currently in an active challenge
   const { data: activeParticipant } = await supabase
     .from('challenge_participants')
     .select('challenge_id, challenges!inner(status)')
@@ -85,8 +203,14 @@ serve(async (req) => {
   }
 
   try {
+    // Decrypt access token before use
+    const encKey = await getEncKey();
+    const accessToken = encKey
+      ? await decryptAccessToken(plaidItem.access_token, encKey)
+      : plaidItem.access_token;
+
     const { added, modified, removed, nextCursor } = await syncIncremental(
-      plaidItem.access_token,
+      accessToken,
       plaidItem.cursor ?? null
     );
 
@@ -102,6 +226,7 @@ serve(async (req) => {
           ? [tx.personal_finance_category.primary]
           : (tx.category ?? []),
         pending: tx.pending ?? false,
+        item_type: plaidItem.item_type ?? 'savings',
       }));
 
       await supabase
@@ -123,40 +248,73 @@ serve(async (req) => {
       .update({ cursor: nextCursor, last_synced_at: new Date().toISOString() })
       .eq('item_id', itemId);
 
-    // Check for disqualification on new (non-pending) debits
+    if (plaidItem.item_type === 'debt') {
+      await refreshAccountBalances(supabase, accessToken, plaidItem.user_id, itemId);
+    }
+
     if (added.length > 0) {
-      await checkDisqualification(supabase, plaidItem.user_id, added);
+      await checkViolations(supabase, plaidItem.user_id, added, plaidItem.item_type ?? 'savings');
     }
   } catch (err: any) {
-    // Log but return 200 so Plaid doesn't keep retrying for non-transient errors
     console.error('plaid-webhook sync error:', err.message);
   }
 
   return new Response('ok', { status: 200 });
 });
 
-/**
- * Checks whether any newly added transactions should immediately disqualify the user.
- *
- * Two violation types are detected:
- *
- * 1. Savings withdrawal — any debit > $15 in an active challenge that contains savings tasks.
- *    Covers the Emergency Fund Sprint rules where withdrawing from the savings account
- *    is a disqualifying event.
- *
- * 2. No-spend category violation — any debit in a category the user declared they'd avoid.
- *    Covers the No-Spend Reset Challenge. Requires the user to have already completed
- *    the "Declare 3 Spending Categories" task; if not declared yet, no check is run.
- *
- * Disqualification deletes the relevant task completions, recalculates points,
- * and sets is_disqualified = true on the participant record.
- */
-async function checkDisqualification(
+async function refreshAccountBalances(
+  supabase: any,
+  accessToken: string,
+  userId: string,
+  plaidItemId: string
+): Promise<void> {
+  try {
+    const res = await fetch(`${PLAID_BASE_URL}/accounts/balance/get`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: PLAID_CLIENT_ID,
+        secret: PLAID_SECRET,
+        access_token: accessToken,
+      }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const accounts: any[] = data.accounts ?? [];
+
+    const rows = accounts.map((a: any) => ({
+      user_id: userId,
+      plaid_item_id: plaidItemId,
+      account_id: a.account_id,
+      name: a.name,
+      account_type: a.type,
+      account_subtype: a.subtype,
+      current_balance: a.balances?.current ?? null,
+      available_balance: a.balances?.available ?? null,
+      updated_at: new Date().toISOString(),
+    }));
+
+    if (rows.length > 0) {
+      await supabase
+        .from('plaid_accounts')
+        .upsert(rows, { onConflict: 'account_id' });
+    }
+  } catch (err: any) {
+    console.error('refreshAccountBalances error:', err.message);
+  }
+}
+
+async function checkViolations(
   supabase: any,
   userId: string,
-  addedTransactions: any[]
+  addedTransactions: any[],
+  itemType: string
 ): Promise<void> {
-  // Only check non-disqualified, active, non-dropped-out participants
+  if (itemType === 'debt') {
+    await checkDebtViolations(supabase, userId, addedTransactions);
+    return;
+  }
+
   const { data: participation } = await supabase
     .from('challenge_participants')
     .select('challenge_id, challenges!inner(start_date, status)')
@@ -171,17 +329,12 @@ async function checkDisqualification(
   const challengeId = participation.challenge_id;
   const challengeStart: string = (participation.challenges as any).start_date;
 
-  // Only consider settled debits on or after the challenge start date
   const newDebits = addedTransactions.filter(
-    (tx: any) =>
-      !tx.pending &&
-      tx.amount > 0 &&
-      tx.date >= challengeStart.split('T')[0]
+    (tx: any) => !tx.pending && tx.amount > 0 && tx.date >= challengeStart.split('T')[0]
   );
 
   if (newDebits.length === 0) return;
 
-  // ── Savings violation ─────────────────────────────────────────────────────
   const { count: savingsTaskCount } = await supabase
     .from('tasks')
     .select('id', { count: 'exact', head: true })
@@ -189,22 +342,13 @@ async function checkDisqualification(
     .eq('task_type', 'savings');
 
   if ((savingsTaskCount ?? 0) > 0) {
-    const hasLargeWithdrawal = newDebits.some(
-      (tx: any) => tx.amount > SAVINGS_WITHDRAWAL_THRESHOLD
-    );
+    const hasLargeWithdrawal = newDebits.some((tx: any) => tx.amount > SAVINGS_WITHDRAWAL_THRESHOLD);
     if (hasLargeWithdrawal) {
-      await disqualifyUser(
-        supabase,
-        userId,
-        challengeId,
-        'Withdrawal detected from linked savings account',
-        ['savings']
-      );
-      return; // No need to check no-spend after a savings disqualification
+      await disqualifyUser(supabase, userId, challengeId, 'Withdrawal detected from linked savings account', ['savings']);
+      return;
     }
   }
 
-  // ── No-spend category violation ───────────────────────────────────────────
   const { data: declaredCategories } = await supabase
     .from('user_no_spend_categories')
     .select('plaid_category')
@@ -222,21 +366,87 @@ async function checkDisqualification(
 
   if (violatingTx) {
     const categoryLabel = violatingTx.personal_finance_category?.primary ?? 'declared category';
-    await disqualifyUser(
+    await breakStreak(
       supabase,
       userId,
       challengeId,
-      `Spending detected in declared no-spend category: ${categoryLabel} (${violatingTx.name} on ${violatingTx.date})`,
-      ['no_spend']
+      `Spending detected in declared no-spend category: ${categoryLabel} (${violatingTx.name} on ${violatingTx.date})`
     );
   }
 }
 
-/**
- * Marks a participant as disqualified.
- * Deletes task completions for the affected task types, recalculates total points,
- * then sets is_disqualified = true with the given reason.
- */
+async function checkDebtViolations(supabase: any, userId: string, addedTransactions: any[]): Promise<void> {
+  const { data: participation } = await supabase
+    .from('challenge_participants')
+    .select('challenge_id, challenges!inner(start_date, status)')
+    .eq('user_id', userId)
+    .eq('is_disqualified', false)
+    .is('dropped_out_at', null)
+    .eq('challenges.status', 'active')
+    .maybeSingle();
+
+  if (!participation) return;
+
+  const challengeId = participation.challenge_id;
+  const challengeStart: string = (participation.challenges as any).start_date;
+
+  const { count: debtTaskCount } = await supabase
+    .from('tasks')
+    .select('id', { count: 'exact', head: true })
+    .eq('challenge_id', challengeId)
+    .eq('task_type', 'debt_payment');
+
+  if ((debtTaskCount ?? 0) === 0) return;
+
+  const largePurchase = addedTransactions.find(
+    (tx: any) => !tx.pending && tx.amount > DEBT_PURCHASE_THRESHOLD && tx.date >= challengeStart.split('T')[0]
+  );
+
+  if (largePurchase) {
+    await breakStreak(
+      supabase,
+      userId,
+      challengeId,
+      `New credit card purchase detected: ${largePurchase.name} ($${largePurchase.amount}) on ${largePurchase.date}`
+    );
+  }
+}
+
+async function breakStreak(supabase: any, userId: string, challengeId: string, reason: string): Promise<void> {
+  const { data: noSpendTasks } = await supabase
+    .from('tasks')
+    .select('id')
+    .eq('challenge_id', challengeId)
+    .eq('task_type', 'no_spend');
+
+  if (noSpendTasks && noSpendTasks.length > 0) {
+    await supabase
+      .from('task_completions')
+      .delete()
+      .eq('user_id', userId)
+      .in('task_id', noSpendTasks.map((t: any) => t.id));
+  }
+
+  const { data: remaining } = await supabase
+    .from('task_completions')
+    .select('tasks!inner(points)')
+    .eq('user_id', userId)
+    .eq('challenge_id', challengeId);
+
+  const newPoints = (remaining ?? []).reduce(
+    (sum: number, c: any) => sum + ((c.tasks as any)?.points ?? 0),
+    0
+  );
+
+  await supabase
+    .from('challenge_participants')
+    .update({ points: newPoints })
+    .eq('user_id', userId)
+    .eq('challenge_id', challengeId);
+
+  console.log(`Streak broken for user ${userId} in challenge ${challengeId}: ${reason}`);
+}
+
 async function disqualifyUser(
   supabase: any,
   userId: string,
@@ -244,7 +454,6 @@ async function disqualifyUser(
   reason: string,
   affectedTaskTypes: string[]
 ): Promise<void> {
-  // Fetch tasks of the affected types for this challenge
   const { data: affectedTasks } = await supabase
     .from('tasks')
     .select('id')
@@ -259,7 +468,6 @@ async function disqualifyUser(
       .in('task_id', affectedTasks.map((t: any) => t.id));
   }
 
-  // Recalculate points from remaining completions
   const { data: remaining } = await supabase
     .from('task_completions')
     .select('tasks!inner(points)')
@@ -273,11 +481,7 @@ async function disqualifyUser(
 
   await supabase
     .from('challenge_participants')
-    .update({
-      is_disqualified: true,
-      disqualification_reason: reason,
-      points: newPoints,
-    })
+    .update({ is_disqualified: true, disqualification_reason: reason, points: newPoints })
     .eq('user_id', userId)
     .eq('challenge_id', challengeId);
 }

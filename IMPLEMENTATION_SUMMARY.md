@@ -1,14 +1,14 @@
 # Tournacent Implementation Summary
 
-Last updated: 2026-04-01
+Last updated: 2026-04-21
 
 ---
 
 ## Project Overview
 
-Tournacent is a financial literacy challenge app built with Expo Router + Supabase. Users create or join challenges, complete real financial tasks (saving, tracking, no-spend streaks), and compete for a pooled prize.
+Tournacent is a financial literacy challenge app built with Expo Router + Supabase. Users create or join challenges, complete real financial tasks (saving, tracking, no-spend streaks, debt repayment, investing), and compete for a pooled prize.
 
-**Current Status:** User-testing ready with simulated payments. Real payment processing and Plaid bank verification are planned but not yet active.
+**Current Status:** Full verification pipeline implemented across all 7 verification types. Plaid savings + debt accounts connected and driving task verification. Simulated payments for user testing.
 
 ---
 
@@ -23,51 +23,105 @@ Tournacent is a financial literacy challenge app built with Expo Router + Supaba
 ### Backend (Supabase)
 - **PostgreSQL** with Row Level Security on all tables
 - **Supabase Auth** — email/password, JWT sessions
-- **Edge Functions (Deno)** — 3 Plaid functions written but not yet deployed
+- **Edge Functions (Deno)** — 4 functions deployed: `create-link-token`, `exchange-token`, `sync-transactions`, `plaid-webhook`
 - **DB Triggers** — auto-activation of group challenges at 3 participants
+- **pg_cron** — daily no-spend streak evaluation
 - **RPC Functions** — `generate_invite_code()`, `get_challenge_by_invite_code()`
 
 ---
 
-## Database Schema
-
-### Tables
+## Database Tables
 
 | Table | Purpose |
 |-------|---------|
 | `profiles` | User display name, avatar |
 | `challenges` | Challenge instances + templates |
 | `challenge_participants` | Who joined what, points, payment_status, dropped_out_at |
-| `tasks` | Tasks per challenge |
-| `task_completions` | Audit trail of completed tasks |
+| `tasks` | Tasks per challenge (with `verification_type` + `form_id`) |
+| `task_completions` | Audit trail of completed tasks (includes `evidence_url` for photos) |
 | `transactions` | Buy-in / payout / refund records |
-| `plaid_items` | Linked bank accounts (access token stored server-side) |
-| `bank_transactions` | Raw transactions synced from Plaid |
+| `plaid_items` | Linked bank accounts; `item_type` = `savings` or `debt`; unique on `(user_id, item_type)` |
+| `bank_transactions` | Raw transactions synced from Plaid; stamped with `item_type` |
+| `plaid_accounts` | Per-account balance snapshot (refreshed after every debt webhook sync) |
+| `user_no_spend_categories` | 3 declared Plaid categories per user per challenge |
+| `task_form_submissions` | Persisted form data from the 7 FormModal types |
+| `task_quiz_submissions` | Quiz answers, score, and profile label |
+| `task_counters` | Single-row progress counter per user per task |
+| `task_text_submissions` | Free-text responses with word count |
 
-### Key Columns Added (migrations 20260329*)
+---
 
-| Column | Table | Purpose |
-|--------|-------|---------|
-| `challenge_type` | challenges | `'solo'` or `'group'` |
-| `is_template` | challenges | Preset library entries shown in Browse |
-| `invite_code` | challenges | Human-readable `TC-XXXX` code |
-| `pending_expires_at` | challenges | 48h window for group to recruit 3 players |
-| `buyin_deadline` | challenges | 48h after activation to pay buy-in |
-| `join_deadline` | challenges | 48h after activation to join |
-| `payment_status` | challenge_participants | `'pending'` or `'paid'` |
-| `dropped_out_at` | challenge_participants | Timestamptz set on dropout (soft-delete); `NULL` = active participant |
+## Key Architecture Decision: task_type vs. verification_type
 
-### Challenge Status Lifecycle
+`task_type` and `verification_type` are deliberately separated:
 
-```
-[template]
-    ↓  (user creates group challenge)
- pending  ──(3 players join)──→  active  ──(end_date reached)──→  completed
-    ↓                               ↓
- (48h no 3 players)          (buy-in deadline, < 3 paid)
-    ↓                               ↓
- cancelled                      cancelled   ← (not yet automated server-side)
-```
+- **`task_type`** — drives color-coding on the task card only (`savings` = violet, `no_spend` = lime green, etc.)
+- **`verification_type`** — drives all completion behavior: which modal opens, what DB writes happen, what validation is enforced
+
+This means a "budget" task (blue) might use `form` verification, a "reading" task (green) might use `quiz` verification, and so on. The two are fully independent.
+
+---
+
+## Verification Pipeline
+
+### `plaid` tasks
+`lib/task-verification.ts` → `verifyTaskCompletion()` → branches by `task_type`:
+- **Savings tasks**: sum all positive `bank_transactions` since challenge start; check against milestone ($25 / $100 / $250)
+- **No-spend tasks**: check for any transaction in declared categories since last streak reset → call `breakStreak()`
+- **Debt payment tasks**: sum negative `bank_transactions` on `item_type='debt'` account; "Pay Off One Debt" reads `plaid_accounts.current_balance ≤ 5`
+
+### `photo` tasks
+Image picker → JPEG upload to `task-evidence/{userId}/{taskId}` → path stored in `task_completions.evidence_url`
+
+### `self_report` tasks
+One-tap confirm; no external check.
+
+### `form` tasks
+`FormModal` (`components/FormModal.tsx`) loads form by `task.form_id`. Seven forms:
+
+| form_id | Inputs | Output |
+|---------|--------|--------|
+| `apr_calculator` | Balance, APR%, min payment | Monthly interest, months to payoff, total interest |
+| `debt_avalanche` | Dynamic debt rows (name, balance, APR) | Sorted payoff order by APR desc |
+| `investment_goal` | Target amount, years (≥5) | Stored goal |
+| `etf_research` | 3 ETFs: ticker + rationale (≥50 words each) | Ticker + rationale per ETF |
+| `bill_audit` | Dynamic bill rows (≥5): provider, rate, end date | Full bill list |
+| `annual_savings` | Dynamic rows: provider, old rate, new rate | Auto-computed annual total |
+| `compound_growth` | Principal, monthly contribution, rate, years | Real-time year-by-year projection table |
+
+All submissions written to `task_form_submissions`.
+
+### `quiz` tasks
+`QuizModal` (`components/QuizModal.tsx`) loads quiz definition from `QUIZZES[task.form_id]` in `lib/quizzes.ts`.
+
+Risk Assessment Quiz: 10 questions, 4 choices (scored 1–4), total range 10–40. Five profiles:
+- Conservative (10–15), Moderately Conservative (16–21), Moderate (22–27), Moderately Aggressive (28–33), Aggressive Growth (34–40)
+
+Profile card displayed before submit once all 10 questions answered. Written to `task_quiz_submissions`.
+
+### `counter` tasks
+`CounterModal` (`components/CounterModal.tsx`). Target parsed from title: `/(\d+)\s*times?/i`. Each tap upserts `task_counters`. Photo evidence required at target. Live progress bar + count shown on task card.
+
+### `text` tasks
+`TextEntryModal` (`components/TextEntryModal.tsx`). Word minimum parsed from description: `/(\d+)\+?\s*words?/i`. Live word count displayed. Written to `task_text_submissions`.
+
+---
+
+## Plaid Integration
+
+### Multi-Account Support
+One savings account + one debt account per user. `plaid_items.item_type` distinguishes them; unique constraint on `(user_id, item_type)`.
+
+### Edge Functions
+- **`create-link-token`** — generates Plaid Link token; includes `redirect_uri` for OAuth banks on web
+- **`exchange-token`** — exchanges public token; accepts `item_type`; upserts on `(user_id, item_type)`
+- **`sync-transactions`** — accepts `item_type`; fetches incremental transactions using cursor; stamps all rows with `item_type`
+- **`plaid-webhook`** — handles `SYNC_UPDATES_AVAILABLE` events; routes by `item_type`:
+  - Savings: syncs transactions → checks no-spend violations (user's declared categories)
+  - Debt: syncs transactions → checks spending freeze violations (>$50 purchase breaks streak) → calls `refreshAccountBalances()` to update `plaid_accounts`
+
+### Task Verification
+`lib/task-verification.ts` reads `bank_transactions` to auto-complete Plaid tasks. The function `verifyTaskCompletion()` is called when user taps a `verification_type='plaid'` task, runs the check, and either marks complete or returns a failure message.
 
 ---
 
@@ -76,100 +130,21 @@ Tournacent is a financial literacy challenge app built with Expo Router + Supaba
 ### Solo Challenge
 1. User browses templates → selects challenge → taps "Solo"
 2. New challenge instance created (`challenge_type = 'solo'`, `status = 'active'`)
-3. Tasks copied from template to new challenge
+3. Tasks copied from template (including `verification_type` and `form_id`)
 4. User added as participant with `payment_status = 'paid'`
-5. Home screen shows active challenge immediately
 
-### Group Challenge
-1. User taps "Group" → sees 3-player minimum info
-2. `generate_invite_code()` RPC generates unique `TC-XXXX` code
-3. New challenge created with `status = 'pending'`, `pending_expires_at = now() + 48h`
-4. Tasks copied from template
-5. Native `Share.share()` opens OS share sheet with invite message
-6. Friends receive link → open `https://tournacent.app/join/TC-XXXX`
-7. `get_challenge_by_invite_code()` RPC (anon-safe) returns challenge preview
-8. Unauthenticated friends prompted to sign up; authenticated friends join directly
-9. `on_participant_joined` trigger fires on each INSERT to `challenge_participants`
-10. When participant count hits 3: challenge status → `active`, `buyin_deadline` and `join_deadline` set to `now() + 48h`
-11. Each participant sees "Buy-In Required" on Home + Wallet screens
-12. Confirming buy-in: `payment_status → 'paid'`, `prize_pool` incremented, transaction recorded
+### Task Completion by Type
 
-### Buy-In (Simulated — Option A)
-- Tapping "Confirm Buy-In" updates `challenge_participants.payment_status = 'paid'`
-- Increments `challenges.prize_pool` by `buy_in_amount`
-- Inserts a `transactions` record with `status = 'verified'`
-- **No real money moves.** This is intentional for user testing. Stripe or ACH needed for production.
-
----
-
-## RLS Policies
-
-| Policy | Table | Rule |
-|--------|-------|------|
-| Users can view their own data | all tables | `user_id = auth.uid()` |
-| Authenticated users can view active challenges | challenges | `status = 'active'` |
-| Users can view challenge templates | challenges | `is_template = true` |
-| Organizers can view own challenges | challenges | `organizer_id = auth.uid()` |
-| Users can view group challenges by invite code | challenges | `invite_code IS NOT NULL AND status IN ('pending','active')` |
-| Participants can view their challenge | challenge_participants | `user_id = auth.uid()` |
-| Active-only participant queries | challenge_participants | Client-side: `.is('dropped_out_at', null)` filter on all home/tasks/leaderboard fetches |
-
----
-
-## RPC Functions
-
-### `generate_invite_code()` → text
-- Security: `DEFINER`, granted to `authenticated`
-- Returns unique `TC-XXXX` code (omits ambiguous chars 0/O/1/I/L)
-- Loops until a non-colliding code is found
-
-### `get_challenge_by_invite_code(code text)` → TABLE
-- Security: `DEFINER`, granted to `anon, authenticated`
-- Returns challenge details for pending/active group challenges
-- Safe for unauthenticated users (invite preview screen)
-
----
-
-## DB Triggers
-
-### `on_participant_joined` (AFTER INSERT on `challenge_participants`)
-Calls `activate_group_challenge()`:
-- Checks if challenge is `type = 'group'` and `status = 'pending'`
-- Counts current participants
-- If count ≥ 3: sets `status = 'active'`, `start_date = now()`, `end_date = now() + duration`, `buyin_deadline = now() + 48h`, `join_deadline = now() + 48h`
-
----
-
-## Plaid Integration
-
-### What Exists
-- `components/PlaidLink.tsx` — WebView wrapper around Plaid Link JS SDK
-- `lib/plaid.ts` — client-side API wrapper calling edge functions
-- 3 Supabase edge functions (Deno, written but not deployed):
-  - `create-link-token` — generates Plaid Link token
-  - `exchange-token` — exchanges public token for access token, upserts `plaid_items`
-  - `sync-transactions` — fetches last 90 days of transactions into `bank_transactions`
-
-### What's Missing
-- Edge functions not deployed (`supabase functions deploy` not run)
-- Plaid credentials not configured as Supabase secrets
-- `bank_transactions` data not used for any task verification
-- No automated disqualification detection from bank data
-
-### To Enable (Sandbox)
-```bash
-# 1. Set secrets in Supabase Dashboard → Edge Functions → Secrets
-PLAID_CLIENT_ID=<from dashboard.plaid.com>
-PLAID_SECRET=<sandbox secret>
-PLAID_ENV=sandbox
-
-# 2. Deploy functions
-supabase functions deploy create-link-token
-supabase functions deploy exchange-token
-supabase functions deploy sync-transactions
-
-# 3. Test with Plaid sandbox credentials
-# Bank: "Chase", User: user_good, Password: pass_good
+```
+User taps task
+  ├── no_spend_declare → category picker modal (3 categories to Plaid)
+  ├── verification_type = 'plaid' → run verifyTaskCompletion() → mark complete or show error
+  ├── verification_type = 'photo' → image picker → upload → mark complete
+  ├── verification_type = 'form' → FormModal(form_id) → compute → submit → task_form_submissions
+  ├── verification_type = 'quiz' → QuizModal(form_id) → answer → profile → task_quiz_submissions
+  ├── verification_type = 'counter' → CounterModal → +/- → photo at target → task_counters
+  ├── verification_type = 'text' → TextEntryModal → live word count → task_text_submissions
+  └── verification_type = 'self_report' → confirm modal → mark complete
 ```
 
 ---
@@ -178,38 +153,58 @@ supabase functions deploy sync-transactions
 
 ```
 app/
-  _layout.tsx              # Root Stack + AuthProvider + join screen
-  index.tsx                # Auth gate (redirects based on session)
-  challenges.tsx           # Browse + solo/group/share modal flow
-  challenge-details.tsx    # Task guidance + anti-gaming rules
+  _layout.tsx              # Root Stack + AuthProvider
+  index.tsx                # Auth gate
   join/[code].tsx          # Invite deep-link handler (anon-safe)
   (auth)/
-    _layout.tsx
     login.tsx
     signup.tsx
   (tabs)/
-    _layout.tsx            # Bottom tabs (Home, Tasks, Wallet, Leaderboard)
-    index.tsx              # Home: active challenge, pending state, buy-in state
-    tasks.tsx              # Task list + completion
-    wallet.tsx             # Buy-in, Plaid link, transactions, prize pool
+    _layout.tsx            # Bottom tabs
+    index.tsx              # Home: active challenge, pending, buy-in states
+    tasks.tsx              # Task list + all 7 verification modal routes
+    wallet.tsx             # Buy-in, Plaid link (savings + debt), transactions
     leaderboard.tsx        # Live rankings
+    browse.tsx             # Challenge browser
 
 components/
   PlaidLink.tsx            # Plaid Link WebView
+  FormModal.tsx            # 7 in-app form types (form verification)
+  QuizModal.tsx            # Generic quiz renderer (quiz verification)
+  CounterModal.tsx         # +/− counter with photo evidence (counter verification)
+  TextEntryModal.tsx       # Free-text entry with live word count (text verification)
+  CounterModal.tsx
+  ui/
+    Button.tsx
+    Card.tsx
+    ProgressBar.tsx
 
 contexts/
-  AuthContext.tsx          # signIn, signUp, signOut, session, user
+  AuthContext.tsx
+  ThemeContext.tsx
+
+hooks/animations/
+  useLeaderboardReorder.ts
+  useScalePress.ts
+  useSwipeAction.ts
 
 lib/
   supabase.ts              # Supabase client + SecureStore adapter
-  plaid.ts                 # Plaid API (calls edge functions)
+  plaid.ts                 # Plaid API (savings + debt accounts)
+  task-verification.ts     # Plaid-backed task verification logic
+  presets.ts               # 5 preset challenges; all tasks typed with verification_type + form_id
+  quizzes.ts               # Generic quiz registry (QUIZZES record keyed by quiz_id)
+
+constants/
+  tokens.ts
 
 supabase/
-  migrations/              # 10 migrations, all pushed
+  migrations/              # 25 migrations, all pushed
   functions/
     create-link-token/index.ts
     exchange-token/index.ts
     sync-transactions/index.ts
+    plaid-webhook/index.ts
 ```
 
 ---
@@ -220,21 +215,20 @@ supabase/
 1. **Signup broken** — Disable email confirmation in Supabase Auth settings
 
 ### High Priority
-2. **Plaid not deployed** — Wallet "Connect Bank" button fails silently
-3. **No real payments** — Buy-in is simulated; no money moves
-4. **No auto-cancel cron** — Expired pending challenges stay pending forever server-side
-5. **No buy-in refund on dropout** — `prize_pool` is not decremented when a paid participant drops out; their buy-in forfeits to the remaining pool (behavior matches design intent but is not yet enforced server-side)
+2. **No real payments** — Buy-in is simulated; no money moves
+3. **No auto-cancel cron** — Expired pending challenges stay pending server-side forever
+4. **No buy-in refund on dropout** — Prize pool not decremented when paid participant drops out
+5. **Plaid credentials** — Must set `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` as Supabase function secrets
 
 ### Medium Priority
-5. **No task auto-verification** — All tasks are self-reported; Plaid data not used
-6. **No prize payout** — When challenge ends, winner is identified but no payout occurs
-7. **App icon placeholder** — Default Expo template icon still in use
+6. **No prize payout** — No logic distributes prize pool at challenge end
+7. **App icon placeholder** — Default Expo template icon
 8. **App Store URLs placeholder** — Invite message links to fake store URLs
 
-### Low Priority (future features)
+### Low Priority (future)
 9. No push notifications
-10. No password reset email
-11. No in-app chat or social features
+10. No password reset
+11. No in-app social features
 12. No admin dashboard
 
 ---
@@ -248,17 +242,15 @@ node_modules/.bin/expo.cmd start --web --port 8081
 # TypeScript check
 npm run typecheck
 
-# APK for testers (sideload)
+# APK for testers
 eas build --platform android --profile preview
-
-# Production AAB for Play Store
-eas build --platform android --profile production
-
-# Deploy Plaid edge functions
-SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy create-link-token
-SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy exchange-token
-SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy sync-transactions
 
 # Push DB migrations
 SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe db push
+
+# Deploy edge functions
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy create-link-token
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy exchange-token
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy sync-transactions
+SUPABASE_ACCESS_TOKEN=<token> /tmp/supabase.exe functions deploy plaid-webhook
 ```

@@ -1,5 +1,9 @@
 # Tournacent Database Schema
 
+Last updated: 2026-04-21
+
+---
+
 ## Core Tables
 
 ### 1. profiles
@@ -14,16 +18,10 @@ CREATE TABLE profiles (
 );
 ```
 
-**Fields:**
-- `id`: User UUID from Supabase Auth
-- `display_name`: User's public name for leaderboards
-- `avatar_url`: Profile picture URL
-- `created_at`: Account creation timestamp
-
 ---
 
 ### 2. challenges
-Main challenge records.
+Main challenge records (instances and templates).
 
 ```sql
 CREATE TABLE challenges (
@@ -36,30 +34,21 @@ CREATE TABLE challenges (
   end_date timestamptz,
   status text DEFAULT 'draft',
   prize_pool numeric DEFAULT 0,
+  challenge_type text DEFAULT 'solo',   -- 'solo' | 'group'
+  is_template boolean DEFAULT false,
+  invite_code text UNIQUE,
+  pending_expires_at timestamptz,
+  buyin_deadline timestamptz,
+  join_deadline timestamptz,
   created_at timestamptz DEFAULT now()
 );
 ```
 
-**Fields:**
-- `id`: Unique challenge identifier
-- `name`: Challenge title (e.g., "30-Day Emergency Fund Sprint")
-- `organizer_id`: User ID of challenge creator
-- `buy_in_amount`: Cost to join ($10–$50)
-- `duration_days`: 7, 14, 21, or 30
-- `start_date`: Challenge start (null until activated)
-- `end_date`: Challenge end date
-- `status`: 'draft', 'active', or 'completed'
-- `prize_pool`: Total pooled money (buy_in_amount × active_participants)
-- `created_at`: When challenge was created
-
-**Preset Challenges:**
-1. 30-Day Emergency Fund Sprint (organizer: system)
-2. No-Spend Reset Challenge (organizer: system)
+**Status lifecycle:** `template → pending → active → completed` (or `cancelled`)
 
 ---
 
 ### 3. challenge_participants
-Tracks user participation in challenges.
 
 ```sql
 CREATE TABLE challenge_participants (
@@ -69,34 +58,17 @@ CREATE TABLE challenge_participants (
   points integer DEFAULT 0,
   is_disqualified boolean DEFAULT false,
   disqualification_reason text,
-  payment_status text DEFAULT 'pending',
-  rank integer,
+  payment_status text DEFAULT 'pending',  -- 'pending' | 'paid' | 'refunded'
+  dropped_out_at timestamptz,             -- NULL = active; set = soft-deleted
   joined_at timestamptz DEFAULT now(),
   UNIQUE(challenge_id, user_id)
 );
 ```
 
-**Fields:**
-- `id`: Participant record ID
-- `challenge_id`: Which challenge
-- `user_id`: Which user
-- `points`: Total points earned (updated real-time)
-- `is_disqualified`: true if removed from prize eligibility
-- `disqualification_reason`: Why they were disqualified
-- `payment_status`: 'pending', 'paid', or 'refunded'
-- `rank`: Current leaderboard position (1, 2, 3, etc.)
-- `joined_at`: When they joined
-
-**Disqualification Reasons:**
-- "Withdrew from savings account"
-- "Failed mandatory task"
-- "Payment failed"
-- "Fraud detected"
-
 ---
 
 ### 4. tasks
-Individual challenge tasks/milestones.
+Individual challenge tasks.
 
 ```sql
 CREATE TABLE tasks (
@@ -106,34 +78,59 @@ CREATE TABLE tasks (
   description text NOT NULL,
   points integer NOT NULL,
   is_mandatory boolean DEFAULT false,
-  task_type text NOT NULL,
+  task_type text NOT NULL,          -- drives color-coding only
+  verification_type text NOT NULL DEFAULT 'self_report',  -- drives completion behavior
+  form_id text,                     -- used by 'form' and 'quiz' verification types
   created_at timestamptz DEFAULT now()
 );
 ```
 
-**Fields:**
-- `id`: Unique task identifier
-- `challenge_id`: Which challenge this task belongs to
-- `title`: Task name (e.g., "Deposit at Least $25")
-- `description`: How to complete the task
-- `points`: Points awarded when completed
-- `is_mandatory`: true if failure = disqualification
-- `task_type`: Category for color-coding
+**`task_type` values (color-coding):**
 
-**Task Types:**
-- `savings`: Violet - deposit/savings tasks
-- `no_spend`: Lime green - avoid spending tasks
-- `budget`: Blue - budgeting tasks
-- `tracking`: Purple - tracking/logging tasks
-- `cooking`: Orange - cooking/meal prep
-- `subscription`: Red - subscription cancellation
-- `reading`: Green - educational content
-- `custom`: Gray - custom/other tasks
+| Value | Color | Hex |
+|-------|-------|-----|
+| `savings` | Violet | `#A78BFA` |
+| `no_spend` | Lime Green | `#84CC16` |
+| `no_spend_declare` | Lime Green | `#84CC16` |
+| `budget` | Blue | `#3B82F6` |
+| `tracking` | Purple | `#8B5CF6` |
+| `cooking` | Amber | `#F59E0B` |
+| `subscription` | Red | `#EF4444` |
+| `reading` | Green | `#10B981` |
+| `debt_payment` | Orange | `#F97316` |
+| `investment` | Teal | `#0D9488` |
+| `negotiation` | Indigo | `#6366F1` |
+| `custom` | Gray | `#6B7280` |
+
+**`verification_type` values (completion behavior):**
+
+| Value | Behavior |
+|-------|----------|
+| `plaid` | Auto-verified against `bank_transactions` / `plaid_accounts` |
+| `photo` | User uploads image to `task-evidence` bucket |
+| `self_report` | User taps confirm; no external check |
+| `form` | Opens `FormModal`; data saved to `task_form_submissions` |
+| `quiz` | Opens `QuizModal`; answers saved to `task_quiz_submissions` |
+| `counter` | Opens `CounterModal`; count persisted to `task_counters` |
+| `text` | Opens `TextEntryModal`; content saved to `task_text_submissions` |
+
+**`form_id` values:**
+
+| Value | Used by | Description |
+|-------|---------|-------------|
+| `apr_calculator` | form | Debt Destroyer — interest + payoff calculator |
+| `debt_avalanche` | form | Debt Destroyer — prioritized payoff order |
+| `investment_goal` | form | Investment Starter — target amount + timeline |
+| `etf_research` | form | Investment Starter — 3 ETF entries with rationale |
+| `bill_audit` | form | Bill Negotiation — recurring bill list |
+| `annual_savings` | form | Bill Negotiation — confirmed savings calculator |
+| `compound_growth` | form | Investment Starter — year-by-year projection |
+| `risk_assessment` | quiz | Investment Starter — 10-question risk profile quiz |
 
 ---
 
 ### 5. task_completions
-Records when users complete tasks.
+Audit trail of completed tasks.
 
 ```sql
 CREATE TABLE task_completions (
@@ -141,26 +138,16 @@ CREATE TABLE task_completions (
   task_id uuid NOT NULL REFERENCES tasks(id),
   user_id uuid NOT NULL REFERENCES profiles(id),
   challenge_id uuid NOT NULL REFERENCES challenges(id),
+  evidence_url text,      -- storage path for photo verification tasks
   completed_at timestamptz DEFAULT now(),
   UNIQUE(task_id, user_id)
 );
 ```
 
-**Fields:**
-- `id`: Completion record ID
-- `task_id`: Which task was completed
-- `user_id`: Which user completed it
-- `challenge_id`: Which challenge (denormalized for fast queries)
-- `completed_at`: When they completed it
-
-**Constraints:**
-- Each user can only complete each task once per challenge
-- Cannot be deleted (audit trail)
-
 ---
 
 ### 6. transactions
-Financial activity tracking.
+Financial activity records.
 
 ```sql
 CREATE TABLE transactions (
@@ -168,312 +155,243 @@ CREATE TABLE transactions (
   user_id uuid NOT NULL REFERENCES profiles(id),
   challenge_id uuid NOT NULL REFERENCES challenges(id),
   amount numeric NOT NULL,
-  transaction_type text NOT NULL,
-  status text NOT NULL DEFAULT 'pending',
+  transaction_type text NOT NULL,   -- 'buy_in' | 'payout' | 'refund'
+  status text NOT NULL DEFAULT 'pending',  -- 'pending' | 'verified' | 'in_progress' | 'denied'
   denial_reason text,
   created_at timestamptz DEFAULT now()
 );
 ```
 
-**Fields:**
-- `id`: Transaction record ID
-- `user_id`: Which user
-- `challenge_id`: Which challenge
-- `amount`: Dollar amount
-- `transaction_type`: 'buy_in', 'payout', or 'refund'
-- `status`: 'pending', 'verified', 'in_progress', or 'denied'
-- `denial_reason`: Why transaction was denied
-- `created_at`: When transaction occurred
-
-**Transaction Flow:**
-
-1. User joins challenge
-   ```
-   Type: buy_in
-   Status: pending → in_progress → verified
-   ```
-
-2. Challenge ends, winner is determined
-   ```
-   Type: payout
-   Status: pending → in_progress → verified
-   ```
-
-3. User withdraws early (emergency fund sprint)
-   ```
-   Type: refund
-   Status: pending → verified (user disqualified)
-   ```
-
 ---
 
-## Queries
+## Plaid Tables
 
-### Get User's Active Challenge
-
-```sql
-SELECT c.*, cp.points, cp.rank
-FROM challenges c
-JOIN challenge_participants cp ON cp.challenge_id = c.id
-WHERE cp.user_id = auth.uid()
-  AND c.status = 'active'
-LIMIT 1;
-```
-
-### Get Leaderboard for Challenge
+### 7. plaid_items
+Linked bank / credit accounts (access tokens stored server-side only).
 
 ```sql
-SELECT cp.rank, cp.points, cp.is_disqualified,
-       p.display_name, p.avatar_url
-FROM challenge_participants cp
-JOIN profiles p ON p.id = cp.user_id
-WHERE cp.challenge_id = $1
-ORDER BY cp.rank ASC;
-```
-
-### Get Tasks for Challenge
-
-```sql
-SELECT *
-FROM tasks
-WHERE challenge_id = $1
-ORDER BY points DESC, is_mandatory DESC;
-```
-
-### Get User's Completed Tasks in Challenge
-
-```sql
-SELECT t.*, tc.completed_at
-FROM tasks t
-LEFT JOIN task_completions tc
-  ON tc.task_id = t.id
-  AND tc.user_id = auth.uid()
-WHERE t.challenge_id = $1
-ORDER BY t.points DESC;
-```
-
-### Calculate Points
-
-```sql
-SELECT COUNT(*) as completed_tasks,
-       SUM(t.points) as total_points
-FROM task_completions tc
-JOIN tasks t ON t.id = tc.task_id
-WHERE tc.user_id = auth.uid()
-  AND tc.challenge_id = $1;
-```
-
-### Get Prize Pool Info
-
-```sql
-SELECT c.prize_pool,
-       COUNT(cp.id) as active_participants,
-       SUM(CASE WHEN cp.payment_status = 'paid' THEN 1 ELSE 0 END) as paid_participants
-FROM challenges c
-LEFT JOIN challenge_participants cp ON cp.challenge_id = c.id
-  AND NOT cp.is_disqualified
-WHERE c.id = $1
-GROUP BY c.id;
+CREATE TABLE plaid_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  item_id text NOT NULL UNIQUE,
+  institution_name text,
+  institution_id text,
+  item_type text NOT NULL DEFAULT 'savings',  -- 'savings' | 'debt'
+  last_synced_at timestamptz,
+  cursor text,                   -- Plaid incremental sync cursor
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, item_type)   -- one savings + one debt account per user
+);
 ```
 
 ---
 
-## Indexes
-
-For performance optimization:
+### 8. bank_transactions
+Raw transactions synced from Plaid.
 
 ```sql
-CREATE INDEX idx_challenge_participants_challenge_id
-  ON challenge_participants(challenge_id);
+CREATE TABLE bank_transactions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  plaid_transaction_id text NOT NULL UNIQUE,
+  account_id text,
+  item_type text NOT NULL DEFAULT 'savings',  -- 'savings' | 'debt'
+  amount numeric NOT NULL,                    -- positive = debit/purchase; negative = payment/credit
+  date date NOT NULL,
+  name text,
+  merchant_name text,
+  personal_finance_category jsonb,
+  created_at timestamptz DEFAULT now()
+);
+```
 
-CREATE INDEX idx_challenge_participants_user_id
-  ON challenge_participants(user_id);
+**Sign convention (credit card / Plaid):**
+- Positive amount → purchase / debit
+- Negative amount → payment toward balance / credit
 
-CREATE INDEX idx_tasks_challenge_id
-  ON tasks(challenge_id);
+---
 
-CREATE INDEX idx_task_completions_task_id
-  ON task_completions(task_id);
+### 9. plaid_accounts
+Per-account balance snapshot, refreshed after every debt webhook sync.
 
-CREATE INDEX idx_task_completions_user_id
-  ON task_completions(user_id);
+```sql
+CREATE TABLE plaid_accounts (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  plaid_item_id text NOT NULL,
+  account_id text NOT NULL,
+  name text,
+  account_type text,
+  account_subtype text,
+  current_balance numeric,
+  available_balance numeric,
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (account_id)
+);
+```
 
-CREATE INDEX idx_transactions_user_id
-  ON transactions(user_id);
+Used by `verifyDebtPaymentTask` to check whether "Pay Off One Debt Completely" is satisfied (`current_balance ≤ 5`).
 
-CREATE INDEX idx_transactions_challenge_id
-  ON transactions(challenge_id);
+---
+
+## Task Submission Tables
+
+### 10. task_form_submissions
+Persists data entered in the 7 FormModal form types.
+
+```sql
+CREATE TABLE task_form_submissions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  challenge_id uuid NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+  form_id text NOT NULL,
+  form_data jsonb NOT NULL DEFAULT '{}',
+  created_at timestamptz DEFAULT now()
+);
+```
+
+**`form_data` shape by `form_id`:**
+
+| `form_id` | Key fields stored |
+|-----------|-------------------|
+| `apr_calculator` | `balance`, `apr`, `min_payment`, `monthly_interest`, `months_to_payoff`, `total_interest` |
+| `debt_avalanche` | `debts[]` — `{name, balance, apr}` sorted by APR descending |
+| `investment_goal` | `target_amount`, `timeline_years` |
+| `etf_research` | `etfs[]` — `{ticker, rationale, word_count}` |
+| `bill_audit` | `bills[]` — `{provider, rate, contract_end}` |
+| `annual_savings` | `reductions[]` — `{provider, old_rate, new_rate}`, `annual_total` |
+| `compound_growth` | `principal`, `monthly_contribution`, `annual_return`, `years`, `final_value`, `projection[]` |
+
+---
+
+### 11. task_quiz_submissions
+Persists quiz answers and computed profile.
+
+```sql
+CREATE TABLE task_quiz_submissions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  challenge_id uuid NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+  quiz_id text NOT NULL,
+  answers jsonb NOT NULL DEFAULT '{}',   -- { question_id: choice_id }
+  score integer NOT NULL,
+  profile_label text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+```
+
+**Risk Assessment scoring:**
+- 10 questions × 4 choices (scored 1–4) = range 10–40
+- Conservative: 10–15 | Moderately Conservative: 16–21 | Moderate: 22–27 | Moderately Aggressive: 28–33 | Aggressive Growth: 34–40
+
+---
+
+### 12. task_counters
+Single-row-per-user-per-task progress counter.
+
+```sql
+CREATE TABLE task_counters (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  challenge_id uuid NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+  count integer NOT NULL DEFAULT 0,
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, task_id)
+);
+```
+
+Counter target is parsed from the task title at runtime (e.g., "Cook at Home 10 Times" → 10). Each `+` / `−` tap immediately upserts this row. Photo evidence is required at submission time.
+
+---
+
+### 13. task_text_submissions
+Persists free-text responses.
+
+```sql
+CREATE TABLE task_text_submissions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  challenge_id uuid NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+  content text NOT NULL,
+  word_count integer NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+```
+
+Word minimum is parsed from the task description at runtime (e.g., "50+ words" → 50). No minimum is enforced if none is stated.
+
+---
+
+## No-Spend Tables
+
+### 14. user_no_spend_categories
+Stores the 3 Plaid categories each user declares to avoid.
+
+```sql
+CREATE TABLE user_no_spend_categories (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  challenge_id uuid NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+  plaid_category text NOT NULL,          -- e.g. 'FOOD_AND_DRINK', 'SHOPPING'
+  created_at timestamptz DEFAULT now()
+);
 ```
 
 ---
 
-## Row Level Security (RLS) Policies
+## RLS Summary
 
-### profiles
-- Users can view their own profile
-- Users can view other users' profiles (for leaderboards)
-- Users can update only their own profile
+All tables have RLS enabled. Policies follow the pattern `auth.uid() = user_id` for user-owned data.
 
-### challenges
-- Users in a challenge can view it
-- Organizers can update their challenges
-- Authenticated users can create challenges
-
-### challenge_participants
-- Users can view other participants in their challenge
-- Users can join challenges
-- Users can update their own participation
-
-### tasks
-- Users in a challenge can view its tasks
-- Challenge organizers can create tasks
-
-### task_completions
-- Users can view all completions in their challenges
-- Users can complete their own tasks
-
-### transactions
-- Users can view only their own transactions
+| Table | Policies |
+|-------|----------|
+| `profiles` | Select own + others (leaderboard); update own |
+| `challenges` | Select active/template/own; insert authenticated |
+| `challenge_participants` | Select/insert/update own participation |
+| `tasks` | Select for challenge participants |
+| `task_completions` | Insert own; select within challenge |
+| `transactions` | Select/insert own |
+| `plaid_items` | Select/insert own |
+| `bank_transactions` | Insert via service role (webhook); select own |
+| `plaid_accounts` | Select own; insert/update via service role |
+| `task_form_submissions` | Insert + select own |
+| `task_quiz_submissions` | Insert + select own |
+| `task_counters` | Full CRUD own |
+| `task_text_submissions` | Insert + select own |
+| `user_no_spend_categories` | Insert + select own |
 
 ---
 
-## Data Flow Examples
+## Migrations (in order)
 
-### Joining a Challenge
-
-1. User clicks "Join Challenge"
-2. System creates `challenge_participants` record:
-   ```
-   INSERT INTO challenge_participants (
-     challenge_id, user_id, payment_status
-   ) VALUES ($1, auth.uid(), 'pending');
-   ```
-
-3. User completes payment flow
-4. System updates `transactions`:
-   ```
-   INSERT INTO transactions (
-     user_id, challenge_id, amount, transaction_type, status
-   ) VALUES (auth.uid(), $1, $2, 'buy_in', 'pending');
-   ```
-
-5. Payment verified
-6. System updates participant:
-   ```
-   UPDATE challenge_participants
-   SET payment_status = 'paid'
-   WHERE user_id = auth.uid()
-     AND challenge_id = $1;
-   ```
-
-### Completing a Task
-
-1. User taps task
-2. System verifies eligibility
-3. User confirms completion
-4. System creates `task_completions` record:
-   ```
-   INSERT INTO task_completions (
-     task_id, user_id, challenge_id
-   ) VALUES ($1, auth.uid(), $2);
-   ```
-
-5. System adds points:
-   ```
-   UPDATE challenge_participants
-   SET points = points + $1
-   WHERE user_id = auth.uid()
-     AND challenge_id = $2;
-   ```
-
-6. System updates ranks:
-   ```
-   WITH ranked AS (
-     SELECT id, ROW_NUMBER() OVER (ORDER BY points DESC) as rank
-     FROM challenge_participants
-     WHERE challenge_id = $1
-   )
-   UPDATE challenge_participants cp
-   SET rank = r.rank
-   FROM ranked r
-   WHERE cp.id = r.id;
-   ```
-
-### Disqualifying a User
-
-1. System detects withdrawal/fraud
-2. System updates participant:
-   ```
-   UPDATE challenge_participants
-   SET is_disqualified = true,
-       disqualification_reason = 'Withdrew from savings account'
-   WHERE user_id = auth.uid()
-     AND challenge_id = $1;
-   ```
-
-3. System recalculates leaderboard ranks
-4. User appears as "Disqualified" on leaderboard (grayed out)
-5. Prize pool redistributes among remaining active players
-
----
-
-## Preset Challenge Data
-
-### Challenge 1: 30-Day Emergency Fund Sprint
-
-**Challenge Record:**
-```
-name: '30-Day Emergency Fund Sprint'
-organizer_id: system_admin_id
-buy_in_amount: 17.50
-duration_days: 30
-status: 'active'
-```
-
-**Tasks (13 total):**
-- 5 mandatory savings tasks (20, 10, 20, 40, 60 pts)
-- 8 optional tasks (30, 25, 40, 20, 35 pts - total 150)
-
-### Challenge 2: No-Spend Reset Challenge
-
-**Challenge Record:**
-```
-name: 'No-Spend Reset Challenge'
-organizer_id: system_admin_id
-buy_in_amount: 15
-duration_days: 21
-status: 'active'
-```
-
-**Tasks (7 total):**
-- 3 mandatory no-spend tasks (20, 40, 60 pts)
-- 4 optional tasks (30, 25, 40, 35 pts - total 130)
-
----
-
-## Real-Time Updates
-
-The app uses Supabase Realtime to keep data fresh:
-
-```typescript
-supabase
-  .from('challenge_participants')
-  .on('UPDATE', payload => {
-    // Update leaderboard with new points/rank
-  })
-  .subscribe();
-
-supabase
-  .from('task_completions')
-  .on('INSERT', payload => {
-    // Update user's task list
-  })
-  .subscribe();
-```
-
-This enables:
-- Live leaderboard updates
-- Real-time point calculations
-- Instant streak counters
-- Immediate disqualification notifications
-
+| File | Description |
+|------|-------------|
+| `20260221155348` | Core schema v2 |
+| `20260221155749` | Sample data |
+| `20260223054751` | Preset challenges |
+| `20260318000000` | Plaid tables (`plaid_items`, `bank_transactions`) |
+| `20260324000000` | Fix preset challenge constraints |
+| `20260324000001` | Fix challenges RLS |
+| `20260328000000` | Allow browsing active challenges |
+| `20260328000001` | Fix constraints and presets |
+| `20260329000000` | Solo/group challenge support |
+| `20260329000001` | Fix template organizer |
+| `20260331000000` | Fix RLS recursion + task types |
+| `20260331000001` | `task-evidence` storage bucket |
+| `20260331000002` | Plaid sync cursor |
+| `20260401000000` | `dropped_out_at` column |
+| `20260401000001` | Group challenge fixes |
+| `20260401000002` | `user_no_spend_categories` table |
+| `20260401000003` | pg_cron streak automation |
+| `20260401000004` | `drop_out` RPC |
+| `20260421000000` | Dead function wiring cleanup |
+| `20260421000001` | `verification_type` + `form_id` on `tasks` |
+| `20260421000002` | Debt account schema (`item_type`, `plaid_accounts`) |
+| `20260421000003` | `task_form_submissions` |
+| `20260421000004` | `task_quiz_submissions` |
+| `20260421000005` | `task_counters` |
+| `20260421000006` | `task_text_submissions` |

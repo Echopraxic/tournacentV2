@@ -72,6 +72,16 @@ CREATE POLICY "Users can update own plaid items"
   USING (auth.uid() = user_id);
 
 -- RLS Policies for bank_transactions
+--
+-- ASSUMPTION: Each user has exactly ONE linked bank account at a time.
+-- This is enforced by UNIQUE(user_id) on plaid_items. Because of that
+-- single-account invariant, checking user_id is sufficient to isolate rows —
+-- there is no need to add challenge_id to these policies.
+--
+-- ⚠️  If multi-account support is ever introduced (removing the UNIQUE
+--     constraint on plaid_items.user_id), these policies MUST be updated
+--     to include challenge_id context so transactions from different linked
+--     accounts are not exposed across challenge groups.
 CREATE POLICY "Users can view own bank transactions"
   ON bank_transactions FOR SELECT
   TO authenticated

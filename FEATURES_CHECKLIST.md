@@ -1,6 +1,6 @@
 # Tournacent Features Checklist
 
-Last updated: 2026-04-01
+Last updated: 2026-04-21
 
 ---
 
@@ -47,7 +47,7 @@ Last updated: 2026-04-01
 - [x] 48-hour pending expiry countdown shown
 - [x] Group challenge auto-activates when 3rd player joins (DB trigger `on_participant_joined`)
 - [x] Additional players can join within 48h after activation (`join_deadline`)
-- [ ] **MISSING: Server-side auto-cancel for expired pending challenges** — client checks `pending_expires_at` but no cron job or DB scheduler cancels challenges that never reach 3 players. Requires a Supabase scheduled function or pg_cron.
+- [ ] **MISSING: Server-side auto-cancel for expired pending challenges** — client checks `pending_expires_at` but no cron job or DB scheduler cancels challenges that never reach 3 players.
 - [ ] **MISSING: Auto-cancel when buy-in deadline passes with < 3 paid players** — not implemented server-side.
 
 ---
@@ -60,7 +60,6 @@ Last updated: 2026-04-01
 - [x] `get_challenge_by_invite_code()` RPC is anon-safe (works before login)
 - [x] Unauthenticated users see challenge preview + prompt to create account
 - [x] Authenticated users can join directly from the invite screen
-- [x] App Store / Play Store URLs in invite message (currently placeholder `id000000000` / `com.tournacent`)
 - [ ] **MISSING: Real App Store / Play Store links** — app not yet published, placeholder URLs used.
 
 ---
@@ -72,8 +71,8 @@ Last updated: 2026-04-01
 - [x] "Confirm Buy-In" button on Home screen buy-in state
 - [x] "Confirm Buy-In" button on Wallet screen (Debit Card option)
 - [x] On confirmation: `payment_status` → `paid`, `prize_pool` incremented, transaction record created
-- [ ] **SIMULATED ONLY: No real money moves** — buy-in marks a DB field. No Stripe, no ACH, no actual charge. This is intentional for user testing (Option A). Real payment processing requires Stripe or similar integration.
-- [ ] **MISSING: Debit card input UI** — the "Debit Card" option has no card number entry. Real implementation requires Stripe Elements or similar.
+- [ ] **SIMULATED ONLY: No real money moves** — buy-in marks a DB field. No Stripe, no ACH, no actual charge.
+- [ ] **MISSING: Debit card input UI** — the "Debit Card" option has no card number entry.
 
 ---
 
@@ -81,12 +80,12 @@ Last updated: 2026-04-01
 
 - [x] Drop Out button on Home screen (pending, buy-in, and active states)
 - [x] Inline confirmation (no native Alert.alert)
-- [x] Soft-delete: sets `dropped_out_at` timestamp on participant record (not a hard DELETE)
+- [x] Soft-delete: sets `dropped_out_at` timestamp on participant record
 - [x] Home screen resets to "No Active Challenge" immediately after dropout
 - [x] Tasks screen excludes dropped-out participations
 - [x] Leaderboard excludes current user if they dropped out; shows "Dropped Out" badge for other dropped players
-- [x] Join screen blocks re-joining after dropout ("You already dropped out of this challenge and cannot rejoin")
-- [ ] **MISSING: Buy-in refund on drop out** — user's buy-in is not returned and the prize pool is not decremented. Forfeit behavior is not yet defined or enforced.
+- [x] Join screen blocks re-joining after dropout
+- [ ] **MISSING: Buy-in refund on drop out** — user's buy-in is not returned; prize pool not decremented.
 
 ---
 
@@ -94,31 +93,69 @@ Last updated: 2026-04-01
 
 - [x] Tasks screen shows all tasks for active challenge
 - [x] Mandatory task badge with warning icon
-- [x] Color-coded task types (savings, no-spend, tracking, cooking, etc.)
+- [x] Color-coded task types (savings, no-spend, budget, tracking, cooking, debt_payment, investment, negotiation, subscription, reading, custom)
+- [x] `task_type` drives color-coding only; `verification_type` drives completion behavior
 - [x] Completion status tracked via `task_completions` table
 - [x] Points awarded on task completion
 - [x] Progress bar (completed / total tasks)
-- [x] `challenge-details.tsx` shows guidance and anti-gaming rules per task
-- [ ] **NOT WIRED: Task auto-verification** — `lib/task-verification.ts` exists but is not connected to any automated verification. Tasks are self-reported (user taps "Complete"). Bank-based verification (checking Plaid transaction data) is not implemented.
+- [x] Swipe-right gesture to trigger task completion
+- [x] `verification_type` field on all tasks; `form_id` for form and quiz tasks
+
+### Verification Types — All Implemented
+
+- [x] **`plaid`** — Plaid transaction/balance data verified via `lib/task-verification.ts`; routes `savings`, `no_spend`, `debt_payment` tasks to dedicated verifiers
+- [x] **`photo`** — Image picker → upload to `task-evidence` storage bucket → stored path in `task_completions.evidence_url`; modal shows task description as upload prompt
+- [x] **`self_report`** — User taps confirm; no external verification
+- [x] **`form`** — Opens `FormModal` with 7 distinct form types:
+  - `apr_calculator`: balance + APR + payment → monthly interest, months to payoff, total interest (computed before submit)
+  - `debt_avalanche`: dynamic debt rows (add/remove) → sorted payoff order by APR
+  - `investment_goal`: target amount + timeline (5+ year minimum enforced)
+  - `etf_research`: 3 ETF entries with ticker + rationale (50-word minimum per entry enforced)
+  - `bill_audit`: dynamic bill rows (add/remove, 5-row minimum enforced): provider, rate, contract end
+  - `annual_savings`: dynamic rows → auto-computed annual savings total displayed live
+  - `compound_growth`: real-time year-by-year projection table as user types
+  - Submissions persisted to `task_form_submissions`
+- [x] **`quiz`** — Opens `QuizModal`; quiz loaded from `lib/quizzes.ts` registry by `form_id`
+  - Risk Assessment Quiz: 10 questions, 4 choices each (scored 1–4), 5 profile tiers
+  - Profiles: Conservative, Moderately Conservative, Moderate, Moderately Aggressive, Aggressive Growth
+  - Profile card shown once all 10 questions answered; submit button requires all answered
+  - Submissions persisted to `task_quiz_submissions` (score + profile label stored)
+- [x] **`counter`** — Opens `CounterModal`; target parsed from task title (e.g. "10 Times")
+  - +/− buttons; each tap immediately upserts count to `task_counters`
+  - Photo evidence required at target; "Complete" button enabled when count ≥ target AND photo selected
+  - Live progress bar + count shown on task card in the list (`task_counters` loaded on every `fetchTasks`)
+- [x] **`text`** — Opens `TextEntryModal` with large multiline input + live word count
+  - Word minimum parsed from task description (e.g. "50+ words" → 50 minimum)
+  - No minimum enforced if none stated in description
+  - Submissions persisted to `task_text_submissions` (full content + word count stored)
+
+### No-Spend Declaration
+
+- [x] Separate category-picker modal for `no_spend_declare` tasks
+- [x] User selects exactly 3 Plaid primary categories to avoid
+- [x] Categories stored in `user_no_spend_categories`; used by webhook for streak violation detection
 
 ---
 
 ## Plaid / Bank Integration
 
-- [x] Plaid Link UI (WebView wrapper in `components/PlaidLink.tsx`)
-- [x] `lib/plaid.ts` API wrapper calls 3 Supabase edge functions
-- [x] 3 Deno edge functions written: `create-link-token`, `exchange-token`, `sync-transactions`
-- [x] `plaid_items` and `bank_transactions` tables exist in schema
-- [ ] **NOT DEPLOYED: Edge functions not pushed to Supabase** — `supabase functions deploy` has not been run. The Wallet "Connect Bank" button will fail with a network error.
-- [ ] **MISSING: Plaid credentials** — `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` not set as Supabase function secrets. Must be configured in Supabase Dashboard → Edge Functions → Secrets.
-- [ ] **NOT CONNECTED: Bank data not used for task verification** — even after Plaid is deployed, no logic reads `bank_transactions` to auto-complete tasks or detect disqualification.
-
-**To enable Plaid (sandbox):**
-1. Create account at dashboard.plaid.com
-2. Get `client_id` + sandbox `secret`
-3. Set secrets in Supabase dashboard
-4. Run `supabase functions deploy create-link-token exchange-token sync-transactions`
-5. Test with sandbox credentials (`user_good` / `pass_good`)
+- [x] Plaid Link UI (`components/PlaidLink.tsx`)
+- [x] `lib/plaid.ts` API wrapper calls Supabase edge functions
+- [x] Multi-account support: one savings account + one debt account per user (`item_type` field on `plaid_items`, unique constraint on `(user_id, item_type)`)
+- [x] `getLinkedAccount()` — savings account only; `getLinkedDebtAccount()` — debt account only
+- [x] `syncDebtTransactions()` — syncs debt account transactions with `item_type: 'debt'`
+- [x] Wallet tab shows debt account section when user is in Debt Destroyer challenge
+- [x] `plaid_accounts` table — stores per-account balances refreshed after every debt webhook sync
+- [x] Edge functions deployed: `create-link-token`, `exchange-token`, `sync-transactions`, `plaid-webhook`
+- [x] `exchange-token` accepts `item_type` and upserts on `(user_id, item_type)` constraint
+- [x] `sync-transactions` accepts `item_type` param; stamps all transactions with their source item type
+- [x] **Plaid webhook** (`plaid-webhook`): routes by `item_type`; savings items → no-spend violation check; debt items → spending freeze violation + `refreshAccountBalances()`
+- [x] **Task verification connected**: `lib/task-verification.ts` reads `bank_transactions` to auto-verify Plaid tasks
+  - Savings tasks: sum net deposits since challenge start vs. milestone thresholds
+  - No-spend tasks: check for transactions in declared categories since last streak reset
+  - Debt payment tasks: sum negative transactions on debt account; "Pay Off One Debt" reads `plaid_accounts.current_balance`
+- [x] Debt violation detection: new credit card purchases >$50 break the 21-Day Spending Freeze streak
+- [ ] **MISSING: Plaid credentials** — `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` must be set as Supabase function secrets.
 
 ---
 
@@ -128,7 +165,7 @@ Last updated: 2026-04-01
 - [x] Current user highlighted in green
 - [x] 1st place crown icon
 - [x] Disqualified players shown in gray with "Disqualified" badge
-- [x] Dropped-out players shown in gray with "Dropped Out" badge, sorted below active and disqualified players
+- [x] Dropped-out players shown in gray with "Dropped Out" badge, sorted below active and disqualified
 - [x] Task completion progress bars per player
 - [x] Refresh control
 
@@ -140,30 +177,30 @@ Last updated: 2026-04-01
 - [x] Status badges (verified, in_progress, denied)
 - [x] Prize pool display (total, paid count, pending count)
 - [x] Buy-in banner when payment is pending on active challenge
-- [x] "Connect Bank via Plaid" button (UI only — edge functions not deployed)
-- [x] Institution name shown after bank is linked
-- [x] Sync Transactions button (UI only — edge functions not deployed)
+- [x] Connect savings account via Plaid Link
+- [x] Connect debt/credit card account via Plaid Link (shown for Debt Destroyer challenge)
+- [x] Institution name shown after account linked
+- [x] Sync Transactions button (savings and debt)
 
 ---
 
 ## Build & Deployment
 
-- [x] `app.json` — correct name ("Tournacent"), slug, bundle ID (`com.tournacent.app`)
+- [x] `app.json` — correct name, slug, bundle ID (`com.tournacent.app`)
 - [x] `eas.json` — preview (APK), development (APK), production (.aab) profiles
 - [ ] **NOT DONE: EAS account setup** — must run `eas login` + `eas build` to produce APK
 - [ ] **NOT DONE: App icon** — still using default Expo template icon
 - [ ] **NOT DONE: Push notifications** — no notification system implemented
-- [ ] **NOT DONE: App Store / Play Store submission** — requires real app icon, privacy policy, screenshots
+- [ ] **NOT DONE: App Store / Play Store submission**
 
 ---
 
-## Server-Side Automation (Missing)
+## Server-Side Automation
 
-- [ ] **Auto-cancel expired pending challenges** — needs pg_cron or Supabase scheduled function
-- [ ] **Auto-cancel when buy-in window closes with < 3 paid players** — same
-- [ ] **Automated prize payout** — no logic to distribute prize pool when challenge ends
-- [ ] **Streak monitoring** — no cron to check daily no-spend compliance
-- [ ] **Disqualification detection** — no automated withdrawal detection from Plaid feed
+- [x] pg_cron job: daily no-spend streak check (migration `20260401000003`)
+- [ ] **MISSING: Auto-cancel expired pending challenges**
+- [ ] **MISSING: Auto-cancel when buy-in window closes with < 3 paid players**
+- [ ] **MISSING: Automated prize payout**
 
 ---
 
@@ -171,18 +208,25 @@ Last updated: 2026-04-01
 
 | Area | Status |
 |------|--------|
-| Auth UI | Done (signup broken by email confirmation) |
+| Auth UI | Done (signup requires email confirmation disabled) |
 | Challenge browsing | Done |
 | Solo challenges | Done |
 | Group challenges + invite | Done |
-| Deep link handling | Done |
 | Buy-in (simulated) | Done |
 | Real payment processing | Not started |
-| Task completion (manual) | Done |
-| Task verification (automated) | Not connected |
-| Plaid UI | Done |
-| Plaid edge functions | Written, not deployed |
+| Task completion — self_report | Done |
+| Task completion — photo upload | Done |
+| Task completion — plaid verified | Done |
+| Task completion — form (7 types) | Done |
+| Task completion — quiz | Done |
+| Task completion — counter | Done |
+| Task completion — text entry | Done |
+| Plaid savings account | Done |
+| Plaid debt account | Done |
+| Plaid edge functions | Deployed |
+| Task verification via Plaid | Done |
+| Debt violation detection | Done |
 | Leaderboard | Done |
-| Server-side automation | Not implemented |
+| Server-side automation (partial) | pg_cron for streaks; payout/cancel missing |
 | APK build | Config ready, not built |
 | App icon | Placeholder |

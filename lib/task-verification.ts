@@ -34,6 +34,7 @@ export const verifyTaskCompletion = async (
     if (taskType === 'savings') return verifySavingsTask(userId, challengeId, task, challenge);
     if (taskType === 'no_spend') return verifyNoSpendTask(userId, challengeId, task, challenge);
     if (taskType === 'tracking') return verifyTrackingTask(userId, challengeId, task, challenge);
+    if (taskType === 'debt_payment') return verifyDebtPaymentTask(userId, challengeId, task, challenge);
 
     return { success: true, message: 'Task completed successfully' };
   } catch (error: any) {
@@ -326,6 +327,103 @@ const verifyTrackingTask = async (
   return {
     success: true,
     message: `${requiredDays}-day expense tracking streak verified via linked bank account.`,
+  };
+};
+
+/**
+ * Verifies debt payment tasks against the user's linked credit card / loan
+ * account (item_type = 'debt' in plaid_items).
+ *
+ * Dollar milestone tasks ("Pay $100 Toward Debt", "Pay $500 Total Toward
+ * Debt"): sums all settled payments (negative Plaid amounts = credits on
+ * the card) since the challenge start date and compares to the required
+ * amount extracted from the task title.
+ *
+ * "Pay Off One Debt Completely" (no dollar amount in title): reads the most
+ * recently refreshed balance from plaid_accounts (updated by the webhook
+ * after every sync) and checks that it is ≤ $5.
+ *
+ * Plaid credit card sign convention: positive = new purchase, negative = payment.
+ */
+const verifyDebtPaymentTask = async (
+  userId: string,
+  challengeId: string,
+  task: any,
+  challenge: any
+): Promise<VerificationResult> => {
+  const { data: debtItem } = await supabase
+    .from('plaid_items')
+    .select('item_id')
+    .eq('user_id', userId)
+    .eq('item_type', 'debt')
+    .maybeSingle();
+
+  if (!debtItem) {
+    return {
+      success: false,
+      message: 'No credit card linked. Connect your debt account in the Wallet tab first.',
+    };
+  }
+
+  const challengeStart = challenge.start_date.split('T')[0];
+  const dollarMatch = task.title.match(/\$(\d[\d,]*)/);
+  const requiredAmount = dollarMatch
+    ? parseFloat(dollarMatch[1].replace(',', ''))
+    : null;
+
+  // "Pay Off One Debt Completely" — check stored balance (refreshed each webhook sync)
+  if (requiredAmount === null) {
+    const { data: accounts } = await supabase
+      .from('plaid_accounts')
+      .select('current_balance, name')
+      .eq('plaid_item_id', debtItem.item_id)
+      .order('current_balance', { ascending: true });
+
+    if (!accounts || accounts.length === 0) {
+      return {
+        success: false,
+        message: 'Balance data not available yet. Wait for your next automatic account sync.',
+      };
+    }
+
+    const lowestBalance: number = accounts[0].current_balance ?? Infinity;
+    if (lowestBalance > 5) {
+      return {
+        success: false,
+        message: `Outstanding balance: $${lowestBalance.toFixed(2)} on ${accounts[0].name}. Pay off the full balance to complete this task.`,
+      };
+    }
+
+    return {
+      success: true,
+      message: `Debt account balance confirmed at $${lowestBalance.toFixed(2)}. Paid off!`,
+    };
+  }
+
+  // Dollar milestone — sum all settled payments (negative = payment on credit card)
+  const { data: payments } = await supabase
+    .from('bank_transactions')
+    .select('amount')
+    .eq('user_id', userId)
+    .eq('item_type', 'debt')
+    .gte('date', challengeStart)
+    .lt('amount', 0)
+    .eq('pending', false);
+
+  const totalPaid = payments
+    ? payments.reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+    : 0;
+
+  if (totalPaid < requiredAmount) {
+    return {
+      success: false,
+      message: `Payment milestone not met. $${totalPaid.toFixed(2)} paid toward debt so far (need $${requiredAmount.toFixed(2)}).`,
+    };
+  }
+
+  return {
+    success: true,
+    message: `Payment verified. $${totalPaid.toFixed(2)} paid toward debt since challenge start.`,
   };
 };
 
