@@ -25,6 +25,7 @@ import { FormModal } from '@/components/FormModal';
 import { QuizModal } from '@/components/QuizModal';
 import { CounterModal, parseCounterTarget } from '@/components/CounterModal';
 import { TextEntryModal } from '@/components/TextEntryModal';
+import { SocialMediaShareModal } from '@/components/SocialMediaShareModal';
 
 interface Task {
   id: string;
@@ -234,6 +235,7 @@ export default function Tasks() {
   const [counterModalVisible, setCounterModalVisible] = useState(false);
   const [counterMap, setCounterMap] = useState<Record<string, number>>({});
   const [textModalVisible, setTextModalVisible] = useState(false);
+  const [socialMediaModalVisible, setSocialMediaModalVisible] = useState(false);
 
   const fetchTasks = async () => {
     if (!user) return;
@@ -354,6 +356,9 @@ export default function Tasks() {
       } else if (task.verification_type === 'text') {
         setSelectedTask(task);
         setTextModalVisible(true);
+      } else if (task.title === 'Create Social Media Share Graphic') {
+        setSelectedTask(task);
+        setSocialMediaModalVisible(true);
       } else {
         setSelectedTask(task);
         setEvidenceUri(null);
@@ -434,6 +439,19 @@ export default function Tasks() {
     }
   };
 
+  const handleSocialMediaShareComplete = async () => {
+    setSocialMediaModalVisible(false);
+    setFeedback({
+      message: 'Now take a screenshot of the graphic and upload it as your evidence.',
+      isError: false,
+    });
+    setTimeout(() => {
+      setSelectedTask(selectedTask);
+      setEvidenceUri(null);
+      setModalVisible(true);
+    }, 1500);
+  };
+
   const uploadEvidence = async (taskId: string): Promise<string | null> => {
     if (!evidenceUri || !user) return null;
     const response = await fetch(evidenceUri);
@@ -451,6 +469,60 @@ export default function Tasks() {
     setUploading(true);
 
     try {
+      // Check 24-hour minimum for Mini Rate Check mandatory tasks
+      if (selectedTask.is_mandatory) {
+        const { data: challenge } = await supabase
+          .from('challenges')
+          .select('preset_id')
+          .eq('id', challengeId)
+          .single();
+
+        if (challenge?.preset_id === 'mini-rate-check') {
+          const { data: allTasks } = await supabase
+            .from('tasks')
+            .select('id, is_mandatory')
+            .eq('challenge_id', challengeId);
+
+          const mandatoryTaskIds = allTasks?.filter(t => t.is_mandatory).map(t => t.id) || [];
+
+          const { data: completions } = await supabase
+            .from('task_completions')
+            .select('task_id')
+            .eq('user_id', user.id)
+            .eq('challenge_id', challengeId)
+            .in('task_id', mandatoryTaskIds);
+
+          const completedMandatory = completions?.length || 0;
+
+          if (completedMandatory >= 4) {
+            const { data: participant } = await supabase
+              .from('challenge_participants')
+              .select('joined_at')
+              .eq('user_id', user.id)
+              .eq('challenge_id', challengeId)
+              .single();
+
+            if (participant?.joined_at) {
+              const joinedTime = new Date(participant.joined_at).getTime();
+              const now = new Date().getTime();
+              const hourElapsed = (now - joinedTime) / (1000 * 60 * 60);
+
+              if (hourElapsed < 24) {
+                setUploading(false);
+                setModalVisible(false);
+                const hoursRemaining = Math.ceil(24 - hourElapsed);
+                setFeedback({
+                  message: `Come back in ${hoursRemaining} hour${hoursRemaining !== 1 ? 's' : ''} to complete the final mandatory task.`,
+                  isError: true,
+                });
+                setTimeout(() => setFeedback(null), 5000);
+                return;
+              }
+            }
+          }
+        }
+      }
+
       // Run Plaid-backed verification for tasks with verification_type 'plaid'.
       // no_spend_declare is handled separately by handleDeclareCategories.
       if (selectedTask.verification_type === 'plaid') {
@@ -815,6 +887,15 @@ export default function Tasks() {
           setTimeout(() => setFeedback(null), 3000);
           fetchTasks();
         }}
+      />
+
+      <SocialMediaShareModal
+        visible={socialMediaModalVisible}
+        onClose={() => {
+          setSocialMediaModalVisible(false);
+          setSelectedTask(null);
+        }}
+        onComplete={handleSocialMediaShareComplete}
       />
 
       <Modal

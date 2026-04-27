@@ -11,7 +11,7 @@ Last updated: 2026-04-21
 - [x] Session persistence (expo-secure-store)
 - [x] AuthContext global state
 - [x] Protected routes (non-auth → redirected to login)
-- [ ] **BROKEN: Signup silently fails** — Supabase requires email confirmation by default, but the app expects an immediate session. Fix: disable email confirmation in Supabase Dashboard → Auth → Settings → Email.
+- [x] Password reset flow (forgot-password.tsx with deep-link email reset)
 
 ---
 
@@ -47,8 +47,8 @@ Last updated: 2026-04-21
 - [x] 48-hour pending expiry countdown shown
 - [x] Group challenge auto-activates when 3rd player joins (DB trigger `on_participant_joined`)
 - [x] Additional players can join within 48h after activation (`join_deadline`)
-- [ ] **MISSING: Server-side auto-cancel for expired pending challenges** — client checks `pending_expires_at` but no cron job or DB scheduler cancels challenges that never reach 3 players.
-- [ ] **MISSING: Auto-cancel when buy-in deadline passes with < 3 paid players** — not implemented server-side.
+- [x] Auto-cancel expired pending challenges (pg_cron job in migration `20260401000003`; runs every 30 min)
+- [x] Auto-cancel when buy-in deadline passes with < 3 paid players (pg_cron job `enforce_buyin_deadline` in migration `20260401000003`)
 
 ---
 
@@ -85,7 +85,7 @@ Last updated: 2026-04-21
 - [x] Tasks screen excludes dropped-out participations
 - [x] Leaderboard excludes current user if they dropped out; shows "Dropped Out" badge for other dropped players
 - [x] Join screen blocks re-joining after dropout
-- [ ] **MISSING: Buy-in refund on drop out** — user's buy-in is not returned; prize pool not decremented.
+- [x] Buy-in refund on dropout (migration `20260422000006_drop_out_refund.sql`; inserts refund transaction and decrements prize pool)
 
 ---
 
@@ -168,6 +168,13 @@ Last updated: 2026-04-21
 - [x] Dropped-out players shown in gray with "Dropped Out" badge, sorted below active and disqualified
 - [x] Task completion progress bars per player
 - [x] Refresh control
+- [x] Challenge completion graphic (auto-displays when challenge ends naturally)
+  - Score card with total points and progress bar
+  - Tasks completed breakdown (mandatory vs optional)
+  - Impact metrics and time elapsed (challenge-type-specific: debt paid, invested, annual savings, etc.)
+  - Leaderboard rank (if multiplayer; skipped for solo)
+  - Native share sheet (SMS, email, social media)
+  - Copy to clipboard for share summary text
 
 ---
 
@@ -198,9 +205,10 @@ Last updated: 2026-04-21
 ## Server-Side Automation
 
 - [x] pg_cron job: daily no-spend streak check (migration `20260401000003`)
-- [ ] **MISSING: Auto-cancel expired pending challenges**
-- [ ] **MISSING: Auto-cancel when buy-in window closes with < 3 paid players**
-- [ ] **MISSING: Automated prize payout**
+- [x] pg_cron job: auto-cancel expired pending challenges (never reached 3 players within 48h)
+- [x] pg_cron job: auto-cancel when buy-in deadline passes with < 3 paid players
+- [x] pg_cron job: automated prize payout (winner-takes-all; ties split evenly; disqualified players excluded)
+- [x] pg_cron jobs: automated data retention (session cleanup, balance snapshots, challenge anonymization, withdrawn consents) in migration `20260422000004`
 
 ---
 
@@ -226,7 +234,7 @@ Last updated: 2026-04-21
 | Plaid edge functions | Deployed |
 | Task verification via Plaid | Done |
 | Debt violation detection | Done |
-| Leaderboard | Done |
-| Server-side automation (partial) | pg_cron for streaks; payout/cancel missing |
+| Leaderboard + completion graphic | Done |
+| Server-side automation | Complete (streaks, pending cancel, buy-in cancel, payout, data retention) |
 | APK build | Config ready, not built |
 | App icon | Placeholder |

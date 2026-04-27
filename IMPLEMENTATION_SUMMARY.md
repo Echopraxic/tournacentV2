@@ -8,7 +8,7 @@ Last updated: 2026-04-21
 
 Tournacent is a financial literacy challenge app built with Expo Router + Supabase. Users create or join challenges, complete real financial tasks (saving, tracking, no-spend streaks, debt repayment, investing), and compete for a pooled prize.
 
-**Current Status:** Full verification pipeline implemented across all 7 verification types. Plaid savings + debt accounts connected and driving task verification. Simulated payments for user testing.
+**Current Status:** Full verification pipeline implemented across all 7 verification types. Plaid savings + debt accounts connected and driving task verification. Simulated payments for user testing. Challenge completion summary graphics, age-gated signup (13+), password reset flow, and Mini Rate Check challenge all implemented.
 
 ---
 
@@ -59,6 +59,21 @@ Tournacent is a financial literacy challenge app built with Expo Router + Supaba
 - **`verification_type`** — drives all completion behavior: which modal opens, what DB writes happen, what validation is enforced
 
 This means a "budget" task (blue) might use `form` verification, a "reading" task (green) might use `quiz` verification, and so on. The two are fully independent.
+
+---
+
+## Authentication Features
+
+### Age Gate (COPPA Compliance)
+- **Signup**: Three separate TextInput fields for MM/DD/YYYY with auto-advance
+- **Validation**: `calculateAge()` function guards against JavaScript date rollover (e.g., Feb 31 → Mar 3)
+- **Enforcement**: Database CHECK constraint on `profiles.date_of_birth`: minimum 13 years old (ISO format)
+- **Migration**: `20260422000008_add_date_of_birth.sql`
+
+### Password Reset
+- **Flow**: "Forgot password?" link on login screen → email reset → deep-link redirect
+- **Implementation**: `app/(auth)/forgot-password.tsx` uses `supabase.auth.resetPasswordForEmail()` with `redirect_uri: 'tournacent://reset-password'`
+- **Navigation**: Deep link redirects to password reset UI after email confirmation
 
 ---
 
@@ -125,6 +140,56 @@ One savings account + one debt account per user. `plaid_items.item_type` disting
 
 ---
 
+## Mini Rate Check Challenge
+
+**New 7-day preset challenge** focused on bill negotiation and rate creep detection.
+
+### Mandatory Tasks (100 points)
+1. **Identify 3 Recurring Charges or Rate Creep** (20 pts) — Free selection from transaction history; >5% annual increase flagged as rate creep
+2. **Research Competitor Market Rates** (20 pts) — Screenshot URLs of competitor pricing for 3+ services
+3. **Call to Negotiate or Cancel** (25 pts) — Screenshot of call log with date and provider
+4. **Confirm Action Completed** (20 pts) — Screenshot of cancellation, refund, or new rate documentation
+5. **Create Social Media Share Graphic** (15 pts) — `SocialMediaShareModal` generates card showing negotiated services, rates, and monthly savings; user screenshots for verification
+
+### Optional Tasks (up to 125 points)
+- Negotiate 2nd/3rd service (25 pts each)
+- Get 3+ confirmed rate reductions (25 pts)
+- Switch provider for savings (25 pts)
+- Automate savings from negotiation (25 pts)
+
+### 24-Hour Minimum Enforcement
+- Blocks completion of all 5 mandatory tasks within first 24 hours of challenge start
+- Prevents speed-running; enforced in `app/(tabs)/tasks.tsx` `handleCompleteTask()`
+
+### Social Media Graphics Component
+- `SocialMediaShareModal` (`components/SocialMediaShareModal.tsx`) — users enter service names and rate changes
+- Generates visual card showing service negotiation summary with color-coded savings
+- Displays real-time monthly and total savings calculations
+- User screenshots graphic for task verification (photo upload)
+
+---
+
+## Challenge Completion Graphics
+
+**Auto-displays on leaderboard when challenge naturally ends.**
+
+### ChallengeCompletionGraphic Component
+- `components/ChallengeCompletionGraphic.tsx` — fetches challenge, task completions, and calculates metrics
+- Card-based layout with theme colors: header (primary green), score card, tasks breakdown, impact metrics, optional leaderboard rank
+- **Metrics calculated by challenge type:**
+  - Debt Destroyer: $XXX paid toward debt (~$3.50/point)
+  - Investment Starter: $XXX invested (~$4/point)
+  - Bill Negotiation: $XXX/year saved (~$24/point annually)
+  - No-Spend Reset: $XXX saved (~$2.50/point)
+  - Emergency Fund Sprint: $XXX saved (~$2/point)
+  - Mini Rate Check: $XXX/month saved (~$3/point)
+
+### Sharing
+- Native share sheet (SMS, email, social media, AirDrop)
+- Copy to clipboard: formatted summary text with score, tasks completed, time, and estimated impact
+
+---
+
 ## Key Flows
 
 ### Solo Challenge
@@ -168,12 +233,13 @@ app/
     browse.tsx             # Challenge browser
 
 components/
-  PlaidLink.tsx            # Plaid Link WebView
-  FormModal.tsx            # 7 in-app form types (form verification)
-  QuizModal.tsx            # Generic quiz renderer (quiz verification)
-  CounterModal.tsx         # +/− counter with photo evidence (counter verification)
-  TextEntryModal.tsx       # Free-text entry with live word count (text verification)
-  CounterModal.tsx
+  PlaidLink.tsx                    # Plaid Link WebView
+  FormModal.tsx                    # 7 in-app form types (form verification)
+  QuizModal.tsx                    # Generic quiz renderer (quiz verification)
+  CounterModal.tsx                 # +/− counter with photo evidence (counter verification)
+  TextEntryModal.tsx               # Free-text entry with live word count (text verification)
+  SocialMediaShareModal.tsx        # Social media graphic generator (Mini Rate Check challenge)
+  ChallengeCompletionGraphic.tsx   # Challenge completion summary (auto-displays on challenge end)
   ui/
     Button.tsx
     Card.tsx
@@ -192,7 +258,7 @@ lib/
   supabase.ts              # Supabase client + SecureStore adapter
   plaid.ts                 # Plaid API (savings + debt accounts)
   task-verification.ts     # Plaid-backed task verification logic
-  presets.ts               # 5 preset challenges; all tasks typed with verification_type + form_id
+  presets.ts               # 6 preset challenges; all tasks typed with verification_type + form_id
   quizzes.ts               # Generic quiz registry (QUIZZES record keyed by quiz_id)
 
 constants/
@@ -211,25 +277,26 @@ supabase/
 
 ## Known Issues / Missing Features
 
-### Critical (blocks user testing)
-1. **Signup broken** — Disable email confirmation in Supabase Auth settings
-
-### High Priority
-2. **No real payments** — Buy-in is simulated; no money moves
-3. **No auto-cancel cron** — Expired pending challenges stay pending server-side forever
-4. **No buy-in refund on dropout** — Prize pool not decremented when paid participant drops out
-5. **Plaid credentials** — Must set `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` as Supabase function secrets
+### Critical (blocks production)
+1. **Plaid credentials not set** — Must set `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` as Supabase function secrets before Plaid production linking
+2. **No real payments** — Buy-in is simulated; no Stripe integration (major feature, post-MVP)
 
 ### Medium Priority
-6. **No prize payout** — No logic distributes prize pool at challenge end
-7. **App icon placeholder** — Default Expo template icon
-8. **App Store URLs placeholder** — Invite message links to fake store URLs
+3. **App icon placeholder** — Default Expo template icon (UX only)
+4. **App Store URLs placeholder** — Invite message links to fake store URLs (blocks production launch)
 
 ### Low Priority (future)
-9. No push notifications
-10. No password reset
-11. No in-app social features
-12. No admin dashboard
+5. No push notifications (UX feature)
+6. No in-app social features beyond challenge invites
+7. No admin dashboard (operational feature)
+
+### Resolved ✅
+- Email confirmation disabled for dev/test (re-enable before production)
+- Auto-cancel cron jobs for pending/buy-in-expired challenges (via pg_cron)
+- Buy-in refund on dropout (migration `20260422000006`)
+- Prize payout logic (pg_cron `process_completed_challenges` in migration `20260401000003`)
+- Password reset flow (deep-link email reset)
+- Age gate for COPPA (13+ minimum, database constraint)
 
 ---
 

@@ -14,6 +14,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeColors } from '@/constants/tokens';
 import { useLeaderboardReorder } from '@/hooks/animations/useLeaderboardReorder';
 import { ProgressBar } from '@/components/ui/ProgressBar';
+import { ChallengeCompletionGraphic } from '@/components/ChallengeCompletionGraphic';
 import { Crown, Trophy } from 'lucide-react-native';
 
 interface Participant {
@@ -137,6 +138,9 @@ export default function Leaderboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isDroppedOut, setIsDroppedOut] = useState(false);
+  const [challengeStatus, setChallengeStatus] = useState<string>('active');
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [showCompletionGraphic, setShowCompletionGraphic] = useState(false);
 
   const fetchLeaderboard = async () => {
     if (!user?.id) return;
@@ -151,7 +155,7 @@ export default function Leaderboard() {
 
       let participantData: any =
         allParticipations?.find((p: any) => p.challenges?.status === 'active') || null;
-      let droppedOut = false;
+      let droppedOutFlag = false;
 
       if (!participantData) {
         const { data: droppedParticipations } = await supabase
@@ -165,25 +169,32 @@ export default function Leaderboard() {
           droppedParticipations?.find((p: any) => p.challenges?.status === 'active') || null;
         if (droppedData) {
           participantData = droppedData;
-          droppedOut = true;
+          droppedOutFlag = true;
         }
       }
 
-      setIsDroppedOut(droppedOut);
+      setIsDroppedOut(droppedOutFlag);
 
       if (participantData) {
-        const challengeId = participantData.challenge_id;
+        const cId = participantData.challenge_id;
+        setChallengeId(cId);
+        setChallengeStatus(participantData.challenges?.status || 'active');
+
+        // Show completion graphic automatically if challenge is completed
+        if (participantData.challenges?.status === 'completed' && !droppedOutFlag) {
+          setShowCompletionGraphic(true);
+        }
 
         const { data: allParticipants } = await supabase
           .from('challenge_participants')
           .select('*, profiles(display_name, avatar_url)')
-          .eq('challenge_id', challengeId)
+          .eq('challenge_id', cId)
           .order('points', { ascending: false });
 
         const { data: allTasks } = await supabase
           .from('tasks')
           .select('id, points')
-          .eq('challenge_id', challengeId);
+          .eq('challenge_id', cId);
 
         const totalMaxPoints = allTasks?.reduce((sum, task) => sum + task.points, 0) || 0;
         setMaxPoints(totalMaxPoints);
@@ -195,7 +206,7 @@ export default function Leaderboard() {
               .from('task_completions')
               .select('*', { count: 'exact', head: true })
               .eq('user_id', participant.user_id)
-              .eq('challenge_id', challengeId);
+              .eq('challenge_id', cId);
 
             return {
               ...participant,
@@ -281,6 +292,24 @@ export default function Leaderboard() {
         <View style={styles.loadingContainer}>
           <Text style={[styles.loadingText, { color: theme.subtext }]}>Loading...</Text>
         </View>
+      </View>
+    );
+  }
+
+  // Show completion graphic if challenge is completed
+  if (showCompletionGraphic && challengeId && user?.id) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Challenge Complete!</Text>
+        </View>
+        <ChallengeCompletionGraphic
+          challengeId={challengeId}
+          userId={user.id}
+          userRank={currentUserRank}
+          totalParticipants={participants.length}
+          onClose={() => setShowCompletionGraphic(false)}
+        />
       </View>
     );
   }
