@@ -34,5 +34,8 @@ yarn-error.*
 # Claude Code local settings (may contain tokens in cached permission strings)
 .claude/settings.local.json
 
+# Supabase CLI local cache (machine-local state, not project content)
+supabase/.temp/
+
 # typescript
 *.tsbuildinfo
