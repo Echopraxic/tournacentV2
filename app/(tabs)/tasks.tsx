@@ -19,7 +19,6 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useSwipeAction } from '@/hooks/animations/useSwipeAction';
 import { useScalePress } from '@/hooks/animations/useScalePress';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { verifyTaskCompletion } from '@/lib/task-verification';
 import { CheckCircle2, Circle, AlertTriangle, Upload, ImageIcon, Check } from 'lucide-react-native';
 import { FormModal } from '@/components/FormModal';
 import { QuizModal } from '@/components/QuizModal';
@@ -389,21 +388,21 @@ export default function Tasks() {
       );
       if (error) throw error;
 
-      await supabase.from('task_completions').insert({
-        task_id: selectedTask.id,
-        user_id: user.id,
-        challenge_id: challengeId,
+      // Categories are declared above; complete-task verifies all 3 exist,
+      // records the completion, and the points trigger derives the score.
+      const { data: result, error: fnErr } = await supabase.functions.invoke('complete-task', {
+        body: { task_id: selectedTask.id },
       });
-
-      await supabase
-        .from('challenge_participants')
-        .update({ points: totalPoints + selectedTask.points })
-        .eq('user_id', user.id)
-        .eq('challenge_id', challengeId);
+      if (fnErr) throw fnErr;
+      if (!result?.success) {
+        setFeedback({ message: result?.message || 'Failed to complete task', isError: true });
+        setTimeout(() => setFeedback(null), 3000);
+        return;
+      }
 
       setCategoryPickerVisible(false);
       setSelectedCategories([]);
-      setFeedback({ message: `Categories declared! +${selectedTask.points} points`, isError: false });
+      setFeedback({ message: result.message || `Categories declared! +${selectedTask.points} points`, isError: false });
       setTimeout(() => setFeedback(null), 3000);
       fetchTasks();
     } catch (error: any) {
@@ -470,101 +469,29 @@ export default function Tasks() {
     setUploading(true);
 
     try {
-      // Check 24-hour minimum for Mini Rate Check mandatory tasks
-      if (selectedTask.is_mandatory) {
-        const { data: challenge } = await supabase
-          .from('challenges')
-          .select('preset_id')
-          .eq('id', challengeId)
-          .single();
-
-        if (challenge?.preset_id === 'mini-rate-check') {
-          const { data: allTasks } = await supabase
-            .from('tasks')
-            .select('id, is_mandatory')
-            .eq('challenge_id', challengeId);
-
-          const mandatoryTaskIds = allTasks?.filter(t => t.is_mandatory).map(t => t.id) || [];
-
-          const { data: completions } = await supabase
-            .from('task_completions')
-            .select('task_id')
-            .eq('user_id', user.id)
-            .eq('challenge_id', challengeId)
-            .in('task_id', mandatoryTaskIds);
-
-          const completedMandatory = completions?.length || 0;
-
-          if (completedMandatory >= 4) {
-            const { data: participant } = await supabase
-              .from('challenge_participants')
-              .select('joined_at')
-              .eq('user_id', user.id)
-              .eq('challenge_id', challengeId)
-              .single();
-
-            if (participant?.joined_at) {
-              const joinedTime = new Date(participant.joined_at).getTime();
-              const now = new Date().getTime();
-              const hourElapsed = (now - joinedTime) / (1000 * 60 * 60);
-
-              if (hourElapsed < 24) {
-                setUploading(false);
-                setModalVisible(false);
-                const hoursRemaining = Math.ceil(24 - hourElapsed);
-                setFeedback({
-                  message: `Come back in ${hoursRemaining} hour${hoursRemaining !== 1 ? 's' : ''} to complete the final mandatory task.`,
-                  isError: true,
-                });
-                setTimeout(() => setFeedback(null), 5000);
-                return;
-              }
-            }
-          }
-        }
-      }
-
-      // Run Plaid-backed verification for tasks with verification_type 'plaid'.
-      // no_spend_declare is handled separately by handleDeclareCategories.
-      if (selectedTask.verification_type === 'plaid') {
-        const verification = await verifyTaskCompletion(
-          user.id,
-          selectedTask.id,
-          challengeId,
-          selectedTask.task_type,
-          selectedTask.is_mandatory
-        );
-        if (!verification.success) {
-          setUploading(false);
-          setModalVisible(false);
-          setFeedback({ message: verification.message, isError: true });
-          setTimeout(() => setFeedback(null), 5000);
-          return;
-        }
-      }
-
+      // Photo evidence is uploaded client-side (to the user's namespaced path);
+      // its path is handed to complete-task, which performs all verification,
+      // records the completion, and lets the DB trigger derive the score.
       let evidenceStoragePath: string | null = null;
       if (selectedTask.verification_type === 'photo') {
         evidenceStoragePath = await uploadEvidence(selectedTask.id);
       }
 
-      await supabase.from('task_completions').insert({
-        task_id: selectedTask.id,
-        user_id: user.id,
-        challenge_id: challengeId,
-        ...(evidenceStoragePath ? { evidence_url: evidenceStoragePath } : {}),
+      const { data: result, error: fnErr } = await supabase.functions.invoke('complete-task', {
+        body: { task_id: selectedTask.id, evidence_url: evidenceStoragePath },
       });
-
-      await supabase
-        .from('challenge_participants')
-        .update({ points: totalPoints + selectedTask.points })
-        .eq('user_id', user.id)
-        .eq('challenge_id', challengeId);
+      if (fnErr) throw fnErr;
+      if (!result?.success) {
+        setModalVisible(false);
+        setFeedback({ message: result?.message || 'Could not complete task', isError: true });
+        setTimeout(() => setFeedback(null), 5000);
+        return;
+      }
 
       setModalVisible(false);
       setSelectedTask(null);
       setEvidenceUri(null);
-      setFeedback({ message: `Task completed! +${selectedTask.points} points`, isError: false });
+      setFeedback({ message: result.message || `Task completed! +${selectedTask.points} points`, isError: false });
       setTimeout(() => setFeedback(null), 3000);
 
       // Fire a 50% milestone notification the first time the user crosses half-way.

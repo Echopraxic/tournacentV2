@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   Linking,
 } from 'react-native';
-import { usePaymentSheet } from '@stripe/stripe-react-native';
+import { usePaymentSheet } from '@/lib/stripe-rn';
 import { supabase } from '@/lib/supabase';
 import { stripeApi } from '@/lib/stripe';
 import { useAuth } from '@/contexts/AuthContext';
@@ -406,6 +406,10 @@ export default function Wallet() {
 
   const handleBuyIn = async () => {
     if (!pendingBuyIn || !user) return;
+    if (pendingBuyIn.buyin_deadline && new Date(pendingBuyIn.buyin_deadline).getTime() <= Date.now()) {
+      Alert.alert('Buy-In Closed', 'The buy-in window for this challenge has closed.');
+      return;
+    }
     setPayingIn(true);
     try {
       const { client_secret } = await stripeApi.createPaymentIntent(pendingBuyIn.id);
@@ -473,6 +477,21 @@ export default function Wallet() {
     const h = Math.ceil((new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60));
     return h > 0 ? h : 0;
   };
+
+  // The buy-in window is closed once the deadline passes. The server
+  // (create-payment-intent) enforces this too; this just blocks the UI.
+  const buyInClosed =
+    !!pendingBuyIn?.buyin_deadline &&
+    new Date(pendingBuyIn.buyin_deadline).getTime() <= Date.now();
+
+  // Winnings the user hasn't received yet (won, but payout still pending because
+  // no payout account existed at win time, or it's still processing). This drives
+  // the just-in-time payout prompt — the payout account UI only appears once the
+  // user has actually won something.
+  const pendingPayoutAmount = transactions
+    .filter((t) => t.transaction_type === 'payout' && t.status === 'pending')
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+  const hasPendingPayout = pendingPayoutAmount > 0;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -655,9 +674,9 @@ export default function Wallet() {
 
             <View style={styles.paymentOptions}>
               <TouchableOpacity
-                style={[styles.paymentOption, pendingBuyIn ? styles.paymentOptionActive : null]}
+                style={[styles.paymentOption, pendingBuyIn && !buyInClosed ? styles.paymentOptionActive : null]}
                 onPress={pendingBuyIn ? handleBuyIn : undefined}
-                disabled={payingIn || !pendingBuyIn}
+                disabled={payingIn || !pendingBuyIn || buyInClosed}
               >
                 <CreditCard color={pendingBuyIn ? '#10B981' : '#374151'} size={20} />
                 <Text style={[styles.paymentOptionText, pendingBuyIn ? styles.paymentOptionActiveText : null]}>
@@ -673,16 +692,18 @@ export default function Wallet() {
                 <Text style={styles.buyInChallenge}>{pendingBuyIn.name}</Text>
                 {pendingBuyIn.buyin_deadline && (
                   <Text style={styles.buyInDeadline}>
-                    {hoursUntil(pendingBuyIn.buyin_deadline)}h left to pay
+                    {buyInClosed
+                      ? 'Buy-in window has closed'
+                      : `${hoursUntil(pendingBuyIn.buyin_deadline)}h left to pay`}
                   </Text>
                 )}
                 <TouchableOpacity
-                  style={[styles.buyInButton, payingIn ? styles.buyInButtonDisabled : null]}
+                  style={[styles.buyInButton, (payingIn || buyInClosed) ? styles.buyInButtonDisabled : null]}
                   onPress={handleBuyIn}
-                  disabled={payingIn}
+                  disabled={payingIn || buyInClosed}
                 >
                   <Text style={styles.buyInButtonText}>
-                    {payingIn ? 'Processing...' : `Confirm Buy-In · $${pendingBuyIn.buy_in_amount}`}
+                    {payingIn ? 'Processing...' : buyInClosed ? 'Buy-In Closed' : `Confirm Buy-In · $${pendingBuyIn.buy_in_amount}`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -690,45 +711,50 @@ export default function Wallet() {
           </Card>
         </View>
 
-        {/* Payout Account Section */}
-        <View style={styles.connectionSection}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Payout Account</Text>
-          <Card style={styles.connectionCard}>
-            <View style={styles.connectionHeader}>
-              <View style={styles.connectionInfo}>
-                <Banknote color={stripeOnboardingComplete ? theme.primary : theme.subtext} size={24} />
-                <Text style={[styles.connectionLabel, { color: theme.text }]}>
-                  {stripeOnboardingComplete ? 'Payout Ready' : stripeAccountId ? 'Setup Incomplete' : 'Not Set Up'}
-                </Text>
+        {/* Payout Account Section — only shown once the user has actually won.
+            Otherwise the wallet stays focused on Payment Method + Bank Account. */}
+        {hasPendingPayout && (
+          <View style={styles.connectionSection}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              🎉 You Won ${pendingPayoutAmount.toFixed(2)}
+            </Text>
+            <Card style={styles.connectionCard}>
+              <View style={styles.connectionHeader}>
+                <View style={styles.connectionInfo}>
+                  <Banknote color={stripeOnboardingComplete ? theme.primary : theme.subtext} size={24} />
+                  <Text style={[styles.connectionLabel, { color: theme.text }]}>
+                    {stripeOnboardingComplete ? 'Payout Processing' : 'Claim Your Prize'}
+                  </Text>
+                </View>
+                {stripeOnboardingComplete && <CheckCircle color={theme.primary} size={24} />}
               </View>
-              {stripeOnboardingComplete && <CheckCircle color={theme.primary} size={24} />}
-            </View>
 
-            {!stripeOnboardingComplete && (
               <View style={styles.explainerBox}>
                 <Text style={styles.explainerText}>
-                  Set up a payout account to receive your prize if you win. Powered by Stripe — your bank details are entered directly with Stripe and never stored by Tournacent.
+                  {stripeOnboardingComplete
+                    ? `Your $${pendingPayoutAmount.toFixed(2)} payout is on its way to your bank account.`
+                    : `Set up your payout details to receive your $${pendingPayoutAmount.toFixed(2)} prize. Powered by Stripe — your bank details are entered directly with Stripe and never stored by Tournacent.`}
                 </Text>
               </View>
-            )}
 
-            {!stripeOnboardingComplete && (
-              <TouchableOpacity
-                style={[styles.connectButton, { backgroundColor: '#6366F1' }]}
-                onPress={handleSetupPayoutAccount}
-                disabled={stripeOnboarding}
-              >
-                {stripeOnboarding
-                  ? <ActivityIndicator size="small" color="#ffffff" />
-                  : <Banknote size={16} color="#ffffff" />
-                }
-                <Text style={styles.connectButtonText}>
-                  {stripeOnboarding ? 'Opening...' : stripeAccountId ? 'Resume Payout Setup' : 'Set Up Payout Account'}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </Card>
-        </View>
+              {!stripeOnboardingComplete && (
+                <TouchableOpacity
+                  style={[styles.connectButton, { backgroundColor: '#6366F1' }]}
+                  onPress={handleSetupPayoutAccount}
+                  disabled={stripeOnboarding}
+                >
+                  {stripeOnboarding
+                    ? <ActivityIndicator size="small" color="#ffffff" />
+                    : <Banknote size={16} color="#ffffff" />
+                  }
+                  <Text style={styles.connectButtonText}>
+                    {stripeOnboarding ? 'Opening...' : stripeAccountId ? 'Resume Payout Setup' : 'Receive My Prize'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </Card>
+          </View>
+        )}
 
         {/* Plaid Bank Connection Section */}
         <View style={styles.plaidSection}>

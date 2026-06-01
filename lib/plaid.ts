@@ -114,17 +114,6 @@ export const plaidApi = {
   },
 
   /**
-   * Returns whether the current user has a linked bank account via Plaid.
-   */
-  async isLinked(): Promise<boolean> {
-    const { data } = await supabase
-      .from('plaid_items')
-      .select('id')
-      .maybeSingle();
-    return !!data;
-  },
-
-  /**
    * Returns the linked institution info and last sync time for the current user.
    */
   async getLinkedAccount(): Promise<LinkedAccount | null> {

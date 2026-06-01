@@ -39,9 +39,12 @@ export default function JoinScreen() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // Re-run when `user` resolves too: a logged-in user who opens the invite link
+  // before auth finishes loading would otherwise skip the participation check
+  // and see a "Join" button for a challenge they're already in.
   useEffect(() => {
     if (code) lookupChallenge();
-  }, [code]);
+  }, [code, user]);
 
   const lookupChallenge = async () => {
     try {

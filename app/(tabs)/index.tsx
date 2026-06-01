@@ -70,7 +70,6 @@ export default function Home() {
   const [showDropWarning, setShowDropWarning] = useState(false);
   const [droppingOut, setDroppingOut] = useState(false);
   const [pendingPlayerCount, setPendingPlayerCount] = useState(0);
-  const [payingIn, setPayingIn] = useState(false);
 
   // Animated prize pool counter
   const prizeDisplayValue = useSharedValue(0);
@@ -174,49 +173,9 @@ export default function Home() {
 
   const onRefresh = () => { setRefreshing(true); fetchData(); };
 
-  const handleCompleteTask = async () => {
-    if (!highestTask || !challenge || !user) return;
-    try {
-      await supabase.from('task_completions').insert({
-        task_id: highestTask.id,
-        user_id: user.id,
-        challenge_id: challenge.id,
-      });
-      await supabase.rpc('increment', { row_id: user.id, x: highestTask.points });
-      setFeedback({ message: `Task completed! +${highestTask.points} points`, isError: false });
-      setTimeout(() => setFeedback(null), 3000);
-      fetchData();
-    } catch (error: any) {
-      setFeedback({ message: error.message || 'Failed to complete task', isError: true });
-      setTimeout(() => setFeedback(null), 3000);
-    }
-  };
-
   const hoursUntil = (iso: string | null) => {
     if (!iso) return 0;
     return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60)));
-  };
-
-  const handleBuyIn = async () => {
-    if (!challenge || !user) return;
-    setPayingIn(true);
-    try {
-      await supabase
-        .from('challenge_participants')
-        .update({ payment_status: 'paid' })
-        .eq('challenge_id', challenge.id)
-        .eq('user_id', user.id);
-      await supabase
-        .from('challenges')
-        .update({ prize_pool: challenge.prize_pool + challenge.buy_in_amount })
-        .eq('id', challenge.id);
-      fetchData();
-    } catch (error: any) {
-      setFeedback({ message: error.message || 'Buy-in failed', isError: true });
-      setTimeout(() => setFeedback(null), 3000);
-    } finally {
-      setPayingIn(false);
-    }
   };
 
   const handleShareAgain = async () => {
@@ -435,10 +394,10 @@ export default function Home() {
             </Text>
           </View>
           <Button
-            title={payingIn ? 'Processing…' : `Confirm Buy-In — $${Number(challenge.buy_in_amount).toFixed(2)}`}
+            title={`Pay Buy-In — $${Number(challenge.buy_in_amount).toFixed(2)}`}
             variant="primary"
-            onPress={handleBuyIn}
-            disabled={payingIn || hoursLeft === 0}
+            onPress={() => router.push('/(tabs)/wallet')}
+            disabled={hoursLeft === 0}
             style={styles.fullWidth}
           />
           <Button
@@ -550,9 +509,9 @@ export default function Home() {
             </View>
             <Text style={[styles.taskTitle, { color: theme.text }]}>{highestTask.title}</Text>
             <Button
-              title="Complete Task"
+              title="Go to Task"
               variant="primary"
-              onPress={handleCompleteTask}
+              onPress={() => router.push('/(tabs)/tasks')}
               style={{ marginTop: tokens.spacing[3] }}
             />
           </Card>

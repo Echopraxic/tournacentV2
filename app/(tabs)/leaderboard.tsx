@@ -201,27 +201,33 @@ export default function Leaderboard() {
         setMaxPoints(totalMaxPoints);
         setTotalTasks(allTasks?.length || 0);
 
-        const participantsWithRank = await Promise.all(
-          (allParticipants || []).map(async (participant, index) => {
-            const { count } = await supabase
-              .from('task_completions')
-              .select('*', { count: 'exact', head: true })
-              .eq('user_id', participant.user_id)
-              .eq('challenge_id', cId);
+        // One query for all completions in this challenge, tallied per user —
+        // avoids an N+1 (previously one count query per participant).
+        const { data: completionRows } = await supabase
+          .from('task_completions')
+          .select('user_id')
+          .eq('challenge_id', cId);
 
-            return {
-              ...participant,
-              rank: index + 1,
-              completed_tasks: count || 0,
-            };
-          })
+        const completionCountByUser = new Map<string, number>();
+        (completionRows ?? []).forEach((row) => {
+          completionCountByUser.set(row.user_id, (completionCountByUser.get(row.user_id) ?? 0) + 1);
+        });
+
+        const participantsWithCounts = (allParticipants || []).map((participant) => ({
+          ...participant,
+          completed_tasks: completionCountByUser.get(participant.user_id) ?? 0,
+        }));
+
+        // Rank is competitive among active players only: a disqualified or
+        // dropped-out player with a high score must not outrank (or take the
+        // crown from) the leading active player. Inactive players sort last.
+        const qualified = participantsWithCounts.filter(p => !p.is_disqualified && !p.dropped_out_at);
+        const disqualified = participantsWithCounts.filter(p => p.is_disqualified && !p.dropped_out_at);
+        const droppedOut = participantsWithCounts.filter(p => p.dropped_out_at);
+
+        const sortedParticipants = [...qualified, ...disqualified, ...droppedOut].map(
+          (p, index) => ({ ...p, rank: index + 1 })
         );
-
-        const qualified = participantsWithRank.filter(p => !p.is_disqualified && !p.dropped_out_at);
-        const disqualified = participantsWithRank.filter(p => p.is_disqualified && !p.dropped_out_at);
-        const droppedOut = participantsWithRank.filter(p => p.dropped_out_at);
-
-        const sortedParticipants = [...qualified, ...disqualified, ...droppedOut];
 
         setParticipants(sortedParticipants as any);
 
@@ -243,8 +249,8 @@ export default function Leaderboard() {
     fetchLeaderboard();
   }, [user]);
 
-  // Re-fetch every time this tab comes into focus so points stay in sync
-  // with the Tasks screen, which updates challenge_participants.points directly.
+  // Re-fetch every time this tab comes into focus so points stay in sync after
+  // task completions (points are recomputed server-side by the DB trigger).
   useFocusEffect(
     useCallback(() => {
       if (user) fetchLeaderboard();

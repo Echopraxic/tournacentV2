@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Stripe from 'https://esm.sh/stripe@14?target=deno';
 
-const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
+const stripe = new Stripe(Deno.env.get('STRIPE_SECRET')!, {
   apiVersion: '2024-06-20',
   httpClient: Stripe.createFetchHttpClient(),
 });
@@ -63,32 +63,14 @@ serve(async (req) => {
           const { challenge_id, user_id } = pi.metadata;
           if (!challenge_id || !user_id) break;
 
-          const { data: challenge } = await supabase
-            .from('challenges')
-            .select('buy_in_amount, prize_pool')
-            .eq('id', challenge_id)
-            .single();
-
-          if (!challenge) break;
-
-          await supabase
-            .from('challenge_participants')
-            .update({ payment_status: 'paid' })
-            .eq('challenge_id', challenge_id)
-            .eq('user_id', user_id);
-
-          await supabase
-            .from('challenges')
-            .update({ prize_pool: challenge.prize_pool + challenge.buy_in_amount })
-            .eq('id', challenge_id);
-
-          await supabase.from('transactions').insert({
-            user_id,
-            challenge_id,
-            amount: challenge.buy_in_amount,
-            transaction_type: 'buy_in',
-            status: 'verified',
+          // Atomic + idempotent: marks paid, increments prize pool, and records
+          // the transaction in a single DB transaction. Duplicate webhook
+          // deliveries return false and have no effect (no double-count).
+          const { error: rpcError } = await supabase.rpc('record_buyin_payment', {
+            p_challenge_id: challenge_id,
+            p_user_id: user_id,
           });
+          if (rpcError) throw new Error(rpcError.message);
 
           break;
         }
@@ -121,7 +103,7 @@ serve(async (req) => {
           if (!accountId) break;
 
           const accountRes = await fetch(`https://api.stripe.com/v1/accounts/${accountId}`, {
-            headers: { Authorization: `Bearer ${Deno.env.get('STRIPE_SECRET_KEY')}` },
+            headers: { Authorization: `Bearer ${Deno.env.get('STRIPE_SECRET')}` },
           });
           const account = await accountRes.json() as Stripe.Account;
 
@@ -135,6 +117,38 @@ serve(async (req) => {
               .from('profiles')
               .update({ stripe_onboarding_complete: true })
               .eq('stripe_account_id', account.id);
+
+            // Just-in-time payout: now that this user can receive transfers,
+            // process any winnings left pending because they had no payout
+            // account when their challenge(s) completed. Re-trigger payout-winner
+            // for each such challenge (fire-and-forget; payout-winner is idempotent).
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('stripe_account_id', account.id)
+              .maybeSingle();
+
+            if (profile) {
+              const { data: pending } = await supabase
+                .from('transactions')
+                .select('challenge_id')
+                .eq('user_id', profile.id)
+                .eq('transaction_type', 'payout')
+                .eq('status', 'pending')
+                .is('stripe_transfer_id', null);
+
+              const challengeIds = [...new Set((pending ?? []).map((p: any) => p.challenge_id))];
+              for (const cid of challengeIds) {
+                fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/payout-winner`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                  },
+                  body: JSON.stringify({ challenge_id: cid }),
+                }).catch(() => {});
+              }
+            }
           }
           break;
         }
@@ -146,8 +160,11 @@ serve(async (req) => {
     });
   } catch (error: any) {
     console.error('stripe-webhook handler error:', error.message);
-    // Return 200 so Stripe does not retry — the error is ours to investigate
-    return new Response(JSON.stringify({ received: true, warning: error.message }), {
+    // Return 500 so Stripe retries (exponential backoff). The handlers are
+    // idempotent, so a retry of an already-processed event is a safe no-op,
+    // while a transient DB failure no longer silently drops a paid buy-in.
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
   }

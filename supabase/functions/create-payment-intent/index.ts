@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Stripe from 'https://esm.sh/stripe@14?target=deno';
 
-const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
+const stripe = new Stripe(Deno.env.get('STRIPE_SECRET')!, {
   apiVersion: '2024-06-20',
   httpClient: Stripe.createFetchHttpClient(),
 });
@@ -52,7 +52,7 @@ serve(async (req) => {
     // Verify user is a participant who hasn't paid yet
     const { data: participant, error: partError } = await supabase
       .from('challenge_participants')
-      .select('id, payment_status, challenges(buy_in_amount, name, status)')
+      .select('id, payment_status, challenges(buy_in_amount, name, status, buyin_deadline)')
       .eq('challenge_id', challenge_id)
       .eq('user_id', user.id)
       .is('dropped_out_at', null)
@@ -75,6 +75,14 @@ serve(async (req) => {
     const challenge = participant.challenges as any;
     if (!challenge || challenge.status !== 'active') {
       return new Response(JSON.stringify({ error: 'Challenge is not active' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+      });
+    }
+
+    // Authoritative buy-in deadline check — a late client can't pay in after the window.
+    if (challenge.buyin_deadline && new Date(challenge.buyin_deadline).getTime() <= Date.now()) {
+      return new Response(JSON.stringify({ error: 'The buy-in window for this challenge has closed.' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
       });

@@ -42,21 +42,6 @@ export default function BrowseScreen() {
   const [codeError, setCodeError] = useState<string | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
 
-  const insertTasksFromPreset = async (preset: PresetChallenge, challengeId: string) => {
-    await supabase.from('tasks').insert(
-      preset.tasks.map((t) => ({ ...t, challenge_id: challengeId }))
-    );
-  };
-
-  const checkNoActiveChallenge = async (): Promise<boolean> => {
-    const { data } = await supabase
-      .from('challenge_participants')
-      .select('challenge_id, challenges(status)')
-      .eq('user_id', user!.id)
-      .is('dropped_out_at', null);
-    return !data?.some((p: any) => ['pending', 'active'].includes(p.challenges?.status));
-  };
-
   const handleJoinWithCode = async () => {
     if (!codeInput || !user) return;
     setLookingUp(true);
@@ -82,45 +67,27 @@ export default function BrowseScreen() {
     setJoining(true);
     setJoinError(null);
     try {
-      const canJoin = await checkNoActiveChallenge();
-      if (!canJoin) {
-        setJoinError('You are already in an active challenge. Drop out first to join a new one.');
+      // Atomic: challenge + tasks + participant created in one transaction,
+      // with the "one active challenge" guard enforced server-side.
+      const { error } = await supabase.rpc('create_challenge_from_preset', {
+        p_name: selectedPreset.name,
+        p_buy_in: selectedPreset.buy_in_amount,
+        p_duration_days: selectedPreset.duration_days,
+        p_challenge_type: 'solo',
+        p_preset_id: selectedPreset.id,
+        p_tasks: selectedPreset.tasks,
+      });
+      if (error) {
+        setJoinError(
+          error.message.includes('ALREADY_IN_CHALLENGE')
+            ? 'You are already in an active challenge. Drop out first to join a new one.'
+            : (error.message ?? 'Something went wrong. Please try again.')
+        );
         return;
       }
 
-      const now = new Date();
-      const endDate = new Date(now.getTime() + selectedPreset.duration_days * 24 * 60 * 60 * 1000);
-
-      const { data: newChallenge, error } = await supabase
-        .from('challenges')
-        .insert({
-          name: selectedPreset.name,
-          organizer_id: user.id,
-          buy_in_amount: selectedPreset.buy_in_amount,
-          duration_days: selectedPreset.duration_days,
-          start_date: now.toISOString(),
-          end_date: endDate.toISOString(),
-          status: 'active',
-          challenge_type: 'solo',
-          prize_pool: 0,
-          is_template: false,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      await Promise.all([
-        insertTasksFromPreset(selectedPreset, newChallenge.id),
-        supabase.from('challenge_participants').insert({
-          challenge_id: newChallenge.id,
-          user_id: user.id,
-          payment_status: 'paid',
-        }),
-      ]);
-
-      // Request push permission now that the user has a stake in the challenge.
-      // Schedule a local backup reminder 24h before the end date.
+      // Request push permission now; schedule a local reminder 24h before the end.
+      const endDate = new Date(Date.now() + selectedPreset.duration_days * 24 * 60 * 60 * 1000);
       registerForPushNotifications(user.id).catch(() => {});
       scheduleEndingReminder(endDate).catch(() => {});
 
@@ -138,49 +105,29 @@ export default function BrowseScreen() {
     setJoining(true);
     setJoinError(null);
     try {
-      const canJoin = await checkNoActiveChallenge();
-      if (!canJoin) {
-        setJoinError('You are already in an active challenge. Drop out first to start a new one.');
+      // Atomic create (challenge + tasks + participant); the invite code is
+      // generated server-side and returned.
+      const { data, error } = await supabase.rpc('create_challenge_from_preset', {
+        p_name: selectedPreset.name,
+        p_buy_in: selectedPreset.buy_in_amount,
+        p_duration_days: selectedPreset.duration_days,
+        p_challenge_type: 'group',
+        p_preset_id: selectedPreset.id,
+        p_tasks: selectedPreset.tasks,
+      });
+      if (error) {
+        setJoinError(
+          error.message.includes('ALREADY_IN_CHALLENGE')
+            ? 'You are already in an active challenge. Drop out first to start a new one.'
+            : (error.message ?? 'Something went wrong. Please try again.')
+        );
         return;
       }
-
-      const { data: code, error: codeError } = await supabase.rpc('generate_invite_code');
-      if (codeError) throw codeError;
-
-      const pendingExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
-
-      const { data: newChallenge, error } = await supabase
-        .from('challenges')
-        .insert({
-          name: selectedPreset.name,
-          organizer_id: user.id,
-          buy_in_amount: selectedPreset.buy_in_amount,
-          duration_days: selectedPreset.duration_days,
-          status: 'pending',
-          challenge_type: 'group',
-          invite_code: code,
-          pending_expires_at: pendingExpiresAt,
-          prize_pool: 0,
-          is_template: false,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      await Promise.all([
-        insertTasksFromPreset(selectedPreset, newChallenge.id),
-        supabase.from('challenge_participants').insert({
-          challenge_id: newChallenge.id,
-          user_id: user.id,
-          payment_status: 'pending',
-        }),
-      ]);
 
       // Request push permission at the moment of commitment (group creation).
       registerForPushNotifications(user.id).catch(() => {});
 
-      setInviteCode(code);
+      setInviteCode((data as any).invite_code);
       setStep('group_sharing');
     } catch (error: any) {
       setJoinError(error?.message ?? 'Something went wrong. Please try again.');
@@ -252,7 +199,7 @@ export default function BrowseScreen() {
                 </View>
                 <View style={styles.detailItem}>
                   <DollarSign size={16} color={theme.subtext} />
-                  <Text style={[styles.detailText, { color: theme.subtext }]}>${preset.buy_in_amount.toFixed(2)} buy-in</Text>
+                  <Text style={[styles.detailText, { color: theme.subtext }]}>${preset.buy_in_amount.toFixed(2)} group buy-in</Text>
                 </View>
                 <View style={styles.detailItem}>
                   <Users size={16} color={theme.subtext} />

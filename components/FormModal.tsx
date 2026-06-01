@@ -343,19 +343,13 @@ export function FormModal({
       });
       if (formErr) throw formErr;
 
-      const { error: completionErr } = await supabase.from('task_completions').insert({
-        task_id: task.id,
-        user_id: userId,
-        challenge_id: challengeId,
+      // Completion + scoring are server-authoritative (complete-task verifies
+      // the submission exists and the points trigger derives the score).
+      const { data: result, error: fnErr } = await supabase.functions.invoke('complete-task', {
+        body: { task_id: task.id },
       });
-      if (completionErr) throw completionErr;
-
-      const { error: pointsErr } = await supabase
-        .from('challenge_participants')
-        .update({ points: totalPoints + task.points })
-        .eq('user_id', userId)
-        .eq('challenge_id', challengeId);
-      if (pointsErr) throw pointsErr;
+      if (fnErr) throw fnErr;
+      if (!result?.success) { setError(result?.message || 'Could not complete task'); return; }
 
       resetState();
       onComplete(task.points);

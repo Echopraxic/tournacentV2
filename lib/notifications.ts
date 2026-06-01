@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
@@ -44,8 +45,11 @@ export async function registerForPushNotifications(userId: string): Promise<stri
     });
   }
 
-  // projectId is required for production EAS builds; falls back gracefully in dev.
-  const projectId = process.env.EXPO_PUBLIC_PROJECT_ID;
+  // projectId is required for production push tokens. `eas init` injects it into
+  // app.json's extra.eas.projectId (read via expo-constants); fall back to the
+  // env var, and degrade gracefully in dev if neither is set.
+  const projectId =
+    Constants.expoConfig?.extra?.eas?.projectId ?? process.env.EXPO_PUBLIC_PROJECT_ID;
   const token = (
     await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)
   ).data;

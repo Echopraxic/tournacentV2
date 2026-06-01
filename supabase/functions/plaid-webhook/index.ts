@@ -88,6 +88,13 @@ async function verifyWebhookSignature(jwtToken: string, rawBody: string): Promis
     const header = JSON.parse(new TextDecoder().decode(b64UrlDecode(parts[0])));
     const payload = JSON.parse(new TextDecoder().decode(b64UrlDecode(parts[1])));
 
+    // Plaid signs webhook JWTs with ES256 (ECDSA P-256). Pin the algorithm so a
+    // forged token can't downgrade us to a different/none algorithm.
+    if (header.alg !== 'ES256') {
+      console.error('plaid-webhook: unexpected JWT alg', header.alg);
+      return false;
+    }
+
     // Fetch Plaid's verification key
     const keyRes = await fetch(`${PLAID_BASE_URL}/webhook_verification_key/get`, {
       method: 'POST',
@@ -98,19 +105,26 @@ async function verifyWebhookSignature(jwtToken: string, rawBody: string): Promis
     const { key } = await keyRes.json();
     if (!key) return false;
 
-    // Import JWK
+    // Import the EC public key. Use only the standard JWK fields — Plaid's
+    // response also carries non-standard timestamps that strict importers reject.
     const cryptoKey = await crypto.subtle.importKey(
       'jwk',
-      key,
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      { kty: key.kty, crv: key.crv, x: key.x, y: key.y, ext: true },
+      { name: 'ECDSA', namedCurve: 'P-256' },
       false,
       ['verify']
     );
 
-    // Verify signature
+    // Verify the ES256 signature. WebCrypto expects the raw R‖S (64-byte) form,
+    // which is exactly how JWT encodes ES256 signatures.
     const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
     const sig = b64UrlDecode(parts[2]);
-    const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, sig, signed);
+    const valid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: { name: 'SHA-256' } },
+      cryptoKey,
+      sig,
+      signed
+    );
     if (!valid) return false;
 
     // Verify body hash

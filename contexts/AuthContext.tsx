@@ -7,7 +7,12 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName: string, dateOfBirth: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    displayName: string,
+    dateOfBirth: string
+  ) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
 }
 
@@ -44,26 +49,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, displayName: string, dateOfBirth: string) => {
+    // display_name / date_of_birth are passed as user metadata; the
+    // on_auth_user_created DB trigger creates the profile row server-side.
+    // This works even when email confirmation is on (no session yet).
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: { display_name: displayName, date_of_birth: dateOfBirth },
+      },
     });
 
     if (error) throw error;
 
-    if (data.user) {
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert([
-          {
-            id: data.user.id,
-            display_name: displayName,
-            date_of_birth: dateOfBirth,
-          },
-        ]);
-
-      if (profileError) throw profileError;
-    }
+    // No session means the user must confirm their email before signing in.
+    return { needsConfirmation: !data.session };
   };
 
   const signOut = async () => {

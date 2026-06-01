@@ -1,9 +1,17 @@
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { Home, ListTodo, Wallet, Trophy, Compass } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function TabsLayout() {
   const { theme } = useTheme();
+  const { session, loading } = useAuth();
+
+  // Guard all tabs: if the session is gone (expired, signed out, or a direct
+  // deep-link with no auth), send the user to login instead of rendering
+  // data-less, broken screens. RLS protects the data regardless; this is UX.
+  if (loading) return null;
+  if (!session) return <Redirect href="/(auth)/login" />;
 
   return (
     <Tabs

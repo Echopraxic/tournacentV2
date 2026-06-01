@@ -138,20 +138,13 @@ export function CounterModal({
         .upload(path, blob, { contentType: evidenceMime, upsert: true });
       if (uploadErr) throw uploadErr;
 
-      const { error: completionErr } = await supabase.from('task_completions').insert({
-        task_id: task.id,
-        user_id: userId,
-        challenge_id: challengeId,
-        evidence_url: path,
+      // Completion + scoring are server-authoritative (complete-task verifies
+      // the counter submission exists and the points trigger derives the score).
+      const { data: result, error: fnErr } = await supabase.functions.invoke('complete-task', {
+        body: { task_id: task.id, evidence_url: path },
       });
-      if (completionErr) throw completionErr;
-
-      const { error: pointsErr } = await supabase
-        .from('challenge_participants')
-        .update({ points: totalPoints + task.points })
-        .eq('user_id', userId)
-        .eq('challenge_id', challengeId);
-      if (pointsErr) throw pointsErr;
+      if (fnErr) throw fnErr;
+      if (!result?.success) { setError(result?.message || 'Could not complete task'); return; }
 
       setEvidenceUri(null);
       onComplete(task.points);

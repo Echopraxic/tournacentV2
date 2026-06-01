@@ -48,6 +48,7 @@ export default function SignUp() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmationSent, setConfirmationSent] = useState(false);
   const { signUp } = useAuth();
   const router = useRouter();
 
@@ -117,14 +118,42 @@ export default function SignUp() {
 
     setLoading(true);
     try {
-      await signUp(email.trim().toLowerCase(), password, displayName.trim(), isoDate);
-      router.replace('/(tabs)');
+      const { needsConfirmation } = await signUp(
+        email.trim().toLowerCase(),
+        password,
+        displayName.trim(),
+        isoDate
+      );
+      if (needsConfirmation) {
+        // Email confirmation is required — there's no session yet, so show a
+        // confirmation prompt instead of navigating into the (session-gated) app.
+        setConfirmationSent(true);
+      } else {
+        router.replace('/(tabs)');
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to create account. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  if (confirmationSent) {
+    return (
+      <View style={[styles.container, styles.content]}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Check Your Email</Text>
+          <Text style={[styles.subtitle, { textAlign: 'center', lineHeight: 22 }]}>
+            We sent a confirmation link to {email.trim().toLowerCase()}. Tap it to verify
+            your account, then sign in.
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.button} onPress={() => router.replace('/(auth)/login')}>
+          <Text style={styles.buttonText}>Back to Sign In</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
