@@ -279,7 +279,7 @@ supabase/
 
 ### Critical (blocks production)
 1. **Plaid credentials not set** — Must set `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` as Supabase function secrets before Plaid production linking
-2. **No real payments** — Buy-in is simulated; no Stripe integration (major feature, post-MVP)
+2. **Stripe not wired** — Scaffolded (see below); requires manual Stripe account setup and secret injection before real money moves
 
 ### Medium Priority
 3. **App icon placeholder** — Default Expo template icon (UX only)
@@ -289,6 +289,37 @@ supabase/
 5. No push notifications (UX feature)
 6. No in-app social features beyond challenge invites
 7. No admin dashboard (operational feature)
+
+---
+
+## Stripe Payment Integration
+
+**Status:** Scaffolded — all code written, requires manual Stripe account setup to activate.
+
+### Architecture
+- **Buy-in flow:** `create-payment-intent` edge function → Stripe PaymentSheet (native modal) → `stripe-webhook` confirms `payment_intent.succeeded` → updates `payment_status = 'paid'`, inserts buy_in transaction
+- **Payout flow:** `process_completed_challenges` pg_cron inserts payout rows (status=`pending`) → calls `payout-winner` edge function via `pg_net.http_post` → Stripe Transfers API → marks transactions `verified` with `stripe_transfer_id`
+- **Winner onboarding:** `create-stripe-account` → Stripe Express account → account link URL → user completes in browser → `account.updated` webhook sets `stripe_onboarding_complete = true`
+
+### New Edge Functions
+
+| Function | Trigger | Purpose |
+|---|---|---|
+| `create-payment-intent` | User taps Confirm Buy-In | Creates Stripe PaymentIntent, returns client_secret |
+| `create-stripe-account` | User taps Set Up Payout Account | Creates Stripe Express account, returns onboarding URL |
+| `payout-winner` | pg_cron via pg_net | Reads pending payout rows, executes Stripe Transfers |
+| `stripe-webhook` | Stripe events | Confirms payments, updates onboarding status |
+
+### Schema Additions
+- `profiles.stripe_account_id` — Stripe Connect Express account ID
+- `profiles.stripe_onboarding_complete` — whether user can receive payouts
+- `challenge_participants.stripe_payment_intent_id` — for reconciliation
+- `transactions.stripe_transfer_id` — populated after Stripe payout
+
+### Manual Setup Required
+See "What You Need to Do" section below.
+
+---
 
 ### Resolved ✅
 - Email confirmation disabled for dev/test (re-enable before production)

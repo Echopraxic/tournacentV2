@@ -11,7 +11,9 @@ import {
   ActivityIndicator,
   Linking,
 } from 'react-native';
+import { usePaymentSheet } from '@stripe/stripe-react-native';
 import { supabase } from '@/lib/supabase';
+import { stripeApi } from '@/lib/stripe';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { plaidApi } from '@/lib/plaid';
@@ -29,6 +31,7 @@ import {
   RefreshCw,
   Shield,
   Trash2,
+  Banknote,
 } from 'lucide-react-native';
 
 const PLAID_CONSENT_VERSION = '1.0';
@@ -67,6 +70,7 @@ interface ActiveChallenge {
 export default function Wallet() {
   const { user } = useAuth();
   const { theme } = useTheme();
+  const { initPaymentSheet, presentPaymentSheet } = usePaymentSheet();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [prizePoolStatus, setPrizePoolStatus] = useState<PrizePoolStatus | null>(null);
   const [connected, setConnected] = useState(false);
@@ -74,6 +78,11 @@ export default function Wallet() {
   const [loading, setLoading] = useState(true);
   const [pendingBuyIn, setPendingBuyIn] = useState<ActiveChallenge | null>(null);
   const [payingIn, setPayingIn] = useState(false);
+
+  // Stripe payout account state
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
+  const [stripeOnboardingComplete, setStripeOnboardingComplete] = useState(false);
+  const [stripeOnboarding, setStripeOnboarding] = useState(false);
 
   // Consent modal state
   const [showConsentModal, setShowConsentModal] = useState(false);
@@ -158,6 +167,11 @@ export default function Wallet() {
       } else {
         setPendingBuyIn(null);
       }
+
+      // Load Stripe payout account status
+      const stripeStatus = await stripeApi.getStripeAccountStatus();
+      setStripeAccountId(stripeStatus.stripe_account_id);
+      setStripeOnboardingComplete(stripeStatus.stripe_onboarding_complete);
 
       // Load Plaid linked savings account info
       const linkedAccount = await plaidApi.getLinkedAccount();
@@ -394,32 +408,48 @@ export default function Wallet() {
     if (!pendingBuyIn || !user) return;
     setPayingIn(true);
     try {
-      await supabase
-        .from('challenge_participants')
-        .update({ payment_status: 'paid' })
-        .eq('challenge_id', pendingBuyIn.id)
-        .eq('user_id', user.id);
+      const { client_secret } = await stripeApi.createPaymentIntent(pendingBuyIn.id);
 
-      await supabase
-        .from('challenges')
-        .update({ prize_pool: pendingBuyIn.prize_pool + pendingBuyIn.buy_in_amount })
-        .eq('id', pendingBuyIn.id);
-
-      await supabase.from('transactions').insert({
-        user_id: user.id,
-        challenge_id: pendingBuyIn.id,
-        amount: pendingBuyIn.buy_in_amount,
-        transaction_type: 'buy_in',
-        status: 'verified',
+      const { error: initError } = await initPaymentSheet({
+        paymentIntentClientSecret: client_secret,
+        merchantDisplayName: 'Tournacent',
+        returnURL: 'tournacent://wallet',
+        applePay: { merchantCountryCode: 'US' },
+        googlePay: { merchantCountryCode: 'US', testEnv: false },
       });
 
-      setConnected(true);
-      setPendingBuyIn(null);
-      fetchWalletData();
+      if (initError) {
+        Alert.alert('Setup Error', initError.message);
+        return;
+      }
+
+      const { error } = await presentPaymentSheet();
+      if (!error) {
+        // stripe-webhook handles DB update; optimistically update UI
+        setConnected(true);
+        setPendingBuyIn(null);
+        Alert.alert('Payment Successful', 'Your buy-in has been confirmed!');
+        fetchWalletData();
+      } else if (error.code !== 'Canceled') {
+        Alert.alert('Payment Failed', error.message);
+      }
     } catch (error: any) {
       Alert.alert('Payment Error', error.message || 'Buy-in failed. Please try again.');
     } finally {
       setPayingIn(false);
+    }
+  };
+
+  const handleSetupPayoutAccount = async () => {
+    setStripeOnboarding(true);
+    try {
+      const { url } = await stripeApi.createStripeAccount();
+      await Linking.openURL(url);
+      // stripe-webhook will set stripe_onboarding_complete=true when Stripe fires account.updated
+    } catch (error: any) {
+      Alert.alert('Setup Error', error.message || 'Failed to start payout account setup.');
+    } finally {
+      setStripeOnboarding(false);
     }
   };
 
@@ -656,6 +686,46 @@ export default function Wallet() {
                   </Text>
                 </TouchableOpacity>
               </View>
+            )}
+          </Card>
+        </View>
+
+        {/* Payout Account Section */}
+        <View style={styles.connectionSection}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Payout Account</Text>
+          <Card style={styles.connectionCard}>
+            <View style={styles.connectionHeader}>
+              <View style={styles.connectionInfo}>
+                <Banknote color={stripeOnboardingComplete ? theme.primary : theme.subtext} size={24} />
+                <Text style={[styles.connectionLabel, { color: theme.text }]}>
+                  {stripeOnboardingComplete ? 'Payout Ready' : stripeAccountId ? 'Setup Incomplete' : 'Not Set Up'}
+                </Text>
+              </View>
+              {stripeOnboardingComplete && <CheckCircle color={theme.primary} size={24} />}
+            </View>
+
+            {!stripeOnboardingComplete && (
+              <View style={styles.explainerBox}>
+                <Text style={styles.explainerText}>
+                  Set up a payout account to receive your prize if you win. Powered by Stripe — your bank details are entered directly with Stripe and never stored by Tournacent.
+                </Text>
+              </View>
+            )}
+
+            {!stripeOnboardingComplete && (
+              <TouchableOpacity
+                style={[styles.connectButton, { backgroundColor: '#6366F1' }]}
+                onPress={handleSetupPayoutAccount}
+                disabled={stripeOnboarding}
+              >
+                {stripeOnboarding
+                  ? <ActivityIndicator size="small" color="#ffffff" />
+                  : <Banknote size={16} color="#ffffff" />
+                }
+                <Text style={styles.connectButtonText}>
+                  {stripeOnboarding ? 'Opening...' : stripeAccountId ? 'Resume Payout Setup' : 'Set Up Payout Account'}
+                </Text>
+              </TouchableOpacity>
             )}
           </Card>
         </View>

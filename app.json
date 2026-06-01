@@ -33,6 +33,13 @@
         {
           "photosPermission": "Allow Tournacent to access your photos to upload cancellation evidence."
         }
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.tournacent.app",
+          "enableGooglePay": true
+        }
       ]
     ],
     "experiments": {
