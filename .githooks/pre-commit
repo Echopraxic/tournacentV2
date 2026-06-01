@@ -1,76 +1,82 @@
 #!/usr/bin/env bash
-# Pre-commit hook: blocks commits that contain high-entropy secrets or known key patterns.
-# Install: git config core.hooksPath .githooks
-#          (or run: npm run prepare)
+# Pre-commit hook: blocks commits that contain real secret VALUES.
+#
+# It matches secret-key prefixes, sensitive env vars *assigned a literal value*,
+# private keys, and service_role JWTs (by decoding them) — but NOT:
+#   - env-var NAMES read at runtime, e.g. Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+#   - the Postgres "service_role" role name in GRANT/RLS statements
+#   - public client keys (Supabase URL, sb_publishable_*, Stripe pk_*)
+# all of which appear legitimately in code and used to trigger false positives.
+#
+# Install: git config core.hooksPath .githooks   (or: npm run prepare)
 
 set -euo pipefail
 
-# Patterns that should never appear in committed files
+# Real secret-value patterns (a value is present, not just a name).
 PATTERNS=(
-  'service_role'
-  'SUPABASE_SERVICE_ROLE_KEY'
-  'PLAID_SECRET[^_]'
-  'PLAID_ENCRYPTION_KEY'
-  'access-token.*=.*[A-Za-z0-9+/]{20}'
-  'private_key'
-  'BEGIN RSA PRIVATE KEY'
-  'BEGIN EC PRIVATE KEY'
-  'sk_live_'
-  'rk_live_'
-)
-
-# Files that are explicitly allowed to mention these patterns (docs, this hook itself)
-EXCLUDED_PATHS=(
-  '.githooks/'
-  'SECURITY_POLICY.md'
-  'DATA_RETENTION_POLICY.md'
-  'CONSENT_MANAGEMENT.md'
-  '*.md'
+  'sk_live_[A-Za-z0-9]{16,}'                       # Stripe live secret key
+  'sk_test_[A-Za-z0-9]{16,}'                       # Stripe test secret key
+  'rk_live_[A-Za-z0-9]{16,}'                       # Stripe restricted key
+  'rk_test_[A-Za-z0-9]{16,}'
+  'whsec_[A-Za-z0-9]{16,}'                         # Stripe webhook signing secret
+  'sb_secret_[A-Za-z0-9]{8,}'                      # Supabase secret (service) key
+  'sbp_[A-Za-z0-9]{36,}'                           # Supabase personal access token
+  'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY'          # PEM private keys
+  # Sensitive env var assigned a literal value (NAME = value), not a NAME read.
+  '(PLAID_SECRET|PLAID_ENCRYPTION_KEY|SUPABASE_SERVICE_ROLE_KEY|STRIPE_SECRET|SERVICE_ROLE_KEY|PRIVATE_KEY)[^A-Za-z0-9_]{0,2}[:=][^A-Za-z0-9]{0,2}[A-Za-z0-9+/_-]{16,}'
 )
 
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$STAGED_FILES" ] && exit 0
 
-if [ -z "$STAGED_FILES" ]; then
-  exit 0
-fi
-
-build_exclude_args() {
-  local args=""
-  for path in "${EXCLUDED_PATHS[@]}"; do
-    args="$args --exclude=$path"
-  done
-  echo "$args"
+# Docs and this hook may legitimately mention secret names/examples.
+is_excluded() {
+  case "$1" in
+    *.md) return 0 ;;
+    .githooks/*) return 0 ;;
+  esac
+  return 1
 }
 
-EXCLUDE_ARGS=$(build_exclude_args)
 FOUND=0
 
-for pattern in "${PATTERNS[@]}"; do
-  # Search only staged content (not working tree)
-  while IFS= read -r file; do
-    # Skip excluded paths
-    skip=0
-    for excl in "${EXCLUDED_PATHS[@]}"; do
-      case "$file" in
-        $excl) skip=1; break ;;
-        *${excl%/}*) skip=1; break ;;
-      esac
-    done
-    [ "$skip" -eq 1 ] && continue
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  is_excluded "$file" && continue
 
-    # Check staged content of this file for the pattern
-    if git show ":$file" 2>/dev/null | grep -qE "$pattern"; then
+  content=$(git show ":$file" 2>/dev/null || true)
+  [ -z "$content" ] && continue
+
+  # 1) Literal secret-value patterns.
+  for pattern in "${PATTERNS[@]}"; do
+    if printf '%s' "$content" | grep -qE "$pattern"; then
       echo "  SECRET DETECTED in $file (pattern: $pattern)"
       FOUND=1
     fi
-  done <<< "$STAGED_FILES"
-done
+  done
+
+  # 2) service_role JWTs — decode each JWT payload and check the role claim.
+  #    This catches a leaked service-role token without flagging public anon JWTs.
+  while IFS= read -r jwt; do
+    [ -z "$jwt" ] && continue
+    payload=$(printf '%s' "$jwt" | cut -d. -f2 | tr '_-' '/+')
+    case $(( ${#payload} % 4 )) in
+      2) payload="${payload}==" ;;
+      3) payload="${payload}=" ;;
+    esac
+    if printf '%s' "$payload" | base64 -d 2>/dev/null | grep -q 'service_role'; then
+      echo "  SERVICE_ROLE JWT DETECTED in $file"
+      FOUND=1
+    fi
+  done < <(printf '%s' "$content" | grep -oE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}' || true)
+
+done <<< "$STAGED_FILES"
 
 if [ "$FOUND" -eq 1 ]; then
   echo ""
-  echo "Commit blocked: potential secrets found in staged files."
-  echo "Review the files above, remove the sensitive values, and try again."
-  echo "If this is a false positive, use: git commit --no-verify (use sparingly)"
+  echo "Commit blocked: real secret value(s) found in staged files."
+  echo "Move them to Supabase Secrets / .env (gitignored) and re-commit."
+  echo "If this is a false positive, use: git commit --no-verify (sparingly)"
   exit 1
 fi
 
