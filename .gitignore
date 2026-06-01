@@ -31,5 +31,8 @@ yarn-error.*
 .env*.local
 .env
 
+# Claude Code local settings (may contain tokens in cached permission strings)
+.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo

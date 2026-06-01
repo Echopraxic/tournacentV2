@@ -71,8 +71,11 @@ Last updated: 2026-04-21
 - [x] "Confirm Buy-In" button on Home screen buy-in state
 - [x] "Confirm Buy-In" button on Wallet screen (Debit Card option)
 - [x] On confirmation: `payment_status` → `paid`, `prize_pool` incremented, transaction record created
-- [ ] **SIMULATED ONLY: No real money moves** — buy-in marks a DB field. No Stripe, no ACH, no actual charge.
-- [ ] **MISSING: Debit card input UI** — the "Debit Card" option has no card number entry.
+- [x] **Stripe PaymentSheet** — real card payments via `@stripe/stripe-react-native`; `create-payment-intent` edge function; `stripe-webhook` confirms on server side
+- [x] **Stripe Connect payout account** — `create-stripe-account` edge function; Express onboarding via browser; `account.updated` webhook marks `stripe_onboarding_complete`
+- [x] **Automated winner payout** — `process_completed_challenges` inserts pending rows → calls `payout-winner` via pg_net → Stripe Transfers API → `stripe_transfer_id` recorded
+- [ ] **Stripe webhook not yet registered** — Must add endpoint in Stripe Dashboard + set `STRIPE_WEBHOOK_SECRET` in Supabase Secrets
+- [ ] **pg_net app settings not configured** — Must run `ALTER DATABASE postgres SET app.service_role_key` once in SQL Editor
 
 ---
 

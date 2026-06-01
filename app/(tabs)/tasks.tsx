@@ -26,6 +26,7 @@ import { QuizModal } from '@/components/QuizModal';
 import { CounterModal, parseCounterTarget } from '@/components/CounterModal';
 import { TextEntryModal } from '@/components/TextEntryModal';
 import { SocialMediaShareModal } from '@/components/SocialMediaShareModal';
+import { showMilestoneNotification } from '@/lib/notifications';
 
 interface Task {
   id: string;
@@ -565,6 +566,15 @@ export default function Tasks() {
       setEvidenceUri(null);
       setFeedback({ message: `Task completed! +${selectedTask.points} points`, isError: false });
       setTimeout(() => setFeedback(null), 3000);
+
+      // Fire a 50% milestone notification the first time the user crosses half-way.
+      const newCompleted = completedCount + 1;
+      const wasBelow = completedCount < Math.ceil(tasks.length / 2);
+      const isNowAt  = newCompleted >= Math.ceil(tasks.length / 2);
+      if (wasBelow && isNowAt && tasks.length > 1) {
+        showMilestoneNotification(50).catch(() => {});
+      }
+
       fetchTasks();
     } catch (error: any) {
       setFeedback({ message: error.message || 'Failed to complete task', isError: true });

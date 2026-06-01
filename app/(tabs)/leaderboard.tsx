@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   RefreshControl,
+  Image,
 } from 'react-native';
 import Animated, { SharedValue, useAnimatedStyle } from 'react-native-reanimated';
 import { useFocusEffect } from 'expo-router';
@@ -15,7 +16,7 @@ import { ThemeColors } from '@/constants/tokens';
 import { useLeaderboardReorder } from '@/hooks/animations/useLeaderboardReorder';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { ChallengeCompletionGraphic } from '@/components/ChallengeCompletionGraphic';
-import { Crown, Trophy } from 'lucide-react-native';
+import { Crown } from 'lucide-react-native';
 
 interface Participant {
   id: string;
@@ -321,7 +322,11 @@ export default function Leaderboard() {
           <Text style={[styles.headerTitle, { color: theme.text }]}>Leaderboard</Text>
         </View>
         <View style={styles.emptyContainer}>
-          <Trophy color={theme.subtext} size={64} />
+          <Image
+            source={require('../../assets/images/trophy_icon.png')}
+            style={styles.emptyIcon}
+            resizeMode="contain"
+          />
           <Text style={[styles.emptyTitle, { color: theme.text }]}>No Active Challenge</Text>
           <Text style={[styles.emptyText, { color: theme.subtext }]}>
             Join a challenge to compete on the leaderboard
@@ -484,11 +489,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
   },
+  emptyIcon: {
+    width: 120,
+    height: 120,
+    marginBottom: 8,
+  },
   emptyTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#111827',
-    marginTop: 24,
+    marginTop: 16,
     marginBottom: 8,
   },
   emptyText: {

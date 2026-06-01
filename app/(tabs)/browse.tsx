@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { PRESET_CHALLENGES, PresetChallenge } from '@/lib/presets';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { registerForPushNotifications, scheduleEndingReminder, scheduleBuyInReminder } from '@/lib/notifications';
 import { ChevronRight, Clock, DollarSign, Users } from 'lucide-react-native';
 
 type ModalStep = 'choose_type' | 'group_info' | 'group_sharing';
@@ -118,6 +119,11 @@ export default function BrowseScreen() {
         }),
       ]);
 
+      // Request push permission now that the user has a stake in the challenge.
+      // Schedule a local backup reminder 24h before the end date.
+      registerForPushNotifications(user.id).catch(() => {});
+      scheduleEndingReminder(endDate).catch(() => {});
+
       closeModal();
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -170,6 +176,9 @@ export default function BrowseScreen() {
           payment_status: 'pending',
         }),
       ]);
+
+      // Request push permission at the moment of commitment (group creation).
+      registerForPushNotifications(user.id).catch(() => {});
 
       setInviteCode(code);
       setStep('group_sharing');

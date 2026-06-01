@@ -278,8 +278,13 @@ supabase/
 ## Known Issues / Missing Features
 
 ### Critical (blocks production)
-1. **Plaid credentials not set** — Must set `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` as Supabase function secrets before Plaid production linking
-2. **Stripe not wired** — Scaffolded (see below); requires manual Stripe account setup and secret injection before real money moves
+1. **Stripe webhook not registered** — Register `https://kqbxkeqyjrczvgksuyox.supabase.co/functions/v1/stripe-webhook` in Stripe Dashboard → Webhooks, then add `STRIPE_WEBHOOK_SECRET` to Supabase Secrets and redeploy `stripe-webhook`
+2. **pg_net app settings not configured** — Run once in Supabase SQL Editor so pg_cron can trigger payouts:
+   ```sql
+   ALTER DATABASE postgres SET app.supabase_url = 'https://kqbxkeqyjrczvgksuyox.supabase.co';
+   ALTER DATABASE postgres SET app.service_role_key = '<your-service-role-key>';
+   ```
+3. **Stripe Connect not enabled** — Enable Connect in Stripe Dashboard before users can receive payouts
 
 ### Medium Priority
 3. **App icon placeholder** — Default Expo template icon (UX only)

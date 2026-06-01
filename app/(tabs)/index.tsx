@@ -8,6 +8,7 @@ import {
   Share,
   Platform,
   TouchableOpacity,
+  Image,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -22,7 +23,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { tokens } from '@/constants/tokens';
-import { Trophy, Target, Clock, Users, Share2, Sun, Moon } from 'lucide-react-native';
+import { Trophy, Target, Clock, Share2, Sun, Moon } from 'lucide-react-native';
 
 const APP_STORE_URL = 'https://apps.apple.com/app/tournacent/id000000000'; // placeholder
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.tournacent'; // placeholder
@@ -307,7 +308,11 @@ export default function Home() {
           <ThemeToggle />
         </View>
         <View style={styles.emptyContainer}>
-          <Trophy color={theme.subtext} size={64} />
+          <Image
+            source={require('../../assets/images/trophy_icon.png')}
+            style={styles.emptyIcon}
+            resizeMode="contain"
+          />
           <Text style={[styles.emptyTitle, { color: theme.text }]}>No Active Challenge</Text>
           <Text style={[styles.emptyText, { color: theme.subtext }]}>
             Join or create a challenge to get started
@@ -338,9 +343,11 @@ export default function Home() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <Card>
-            <View style={styles.pendingIconRow}>
-              <Users color={theme.primary} size={32} />
-            </View>
+            <Image
+              source={require('../../assets/images/waiting_users_icon.png')}
+              style={styles.pendingIcon}
+              resizeMode="contain"
+            />
             <Text style={[styles.pendingTitle, { color: theme.text }]}>Waiting for Players</Text>
             <Text style={[styles.pendingName, { color: theme.subtext }]}>{challenge.name}</Text>
 
@@ -589,13 +596,14 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { fontSize: 16 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
-  emptyTitle: { fontSize: 24, fontWeight: '700', marginTop: 24, marginBottom: 8 },
+  emptyIcon: { width: 120, height: 120, marginBottom: 8 },
+  emptyTitle: { fontSize: 24, fontWeight: '700', marginTop: 16, marginBottom: 8 },
   emptyText: { fontSize: 16, textAlign: 'center', marginBottom: 24 },
   browseButton: { width: '100%' },
   fullWidth: { width: '100%' },
   flex1: { flex: 1 },
   // Pending state
-  pendingIconRow: { alignSelf: 'center', backgroundColor: '#D1FAE5', borderRadius: 50, padding: 16, marginBottom: 8 },
+  pendingIcon: { width: 80, height: 80, alignSelf: 'center', marginBottom: 8 },
   pendingTitle: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
   pendingName: { fontSize: 15, textAlign: 'center' },
   pendingStats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginVertical: 8 },

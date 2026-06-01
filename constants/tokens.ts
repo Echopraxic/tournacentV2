@@ -29,4 +29,4 @@ export const tokens = {
 } as const;
 
 export type ColorMode = keyof typeof tokens.colors;
-export type ThemeColors = typeof tokens.colors.light; // same shape for both modes
+export type ThemeColors = { [K in keyof typeof tokens.colors.light]: string };

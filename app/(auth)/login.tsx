@@ -7,6 +7,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -54,7 +55,11 @@ export default function Login() {
     >
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title}>Tournacent</Text>
+          <Image
+            source={require('../../assets/images/Tournacent Logo v2.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
           <Text style={styles.subtitle}>Financial challenges with friends</Text>
         </View>
 
@@ -133,11 +138,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 48,
   },
-  title: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
+  logo: {
+    width: 220,
+    height: 80,
+    marginBottom: 12,
   },
   subtitle: {
     fontSize: 16,
