@@ -2,7 +2,7 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
-  /* Brand colors from constants/tokens.ts */
+  /* Dark mode defaults (matches app's dark theme) */
   --color-primary: #00E38C;
   --color-primary-muted: #00A86B;
   --color-accent: #10B981;
@@ -13,10 +13,23 @@
   --color-danger: #FF5C5C;
   --color-border: #1E2733;
 
-  /* Border radii from constants/tokens.ts */
   --radius-sm: 8px;
   --radius-md: 16px;
   --radius-lg: 24px;
+}
+
+/* Light mode — switches automatically based on OS preference */
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-primary: #00A86B;
+    --color-primary-muted: #007A4D;
+    --color-bg: #F7F9FC;
+    --color-surface: #FFFFFF;
+    --color-text: #0F172A;
+    --color-subtext: #5B6472;
+    --color-danger: #DC2626;
+    --color-border: #E5E7EB;
+  }
 }
 
 html {

@@ -16,7 +16,7 @@ export default function TermsPage() {
   return (
     <div className="max-w-4xl mx-auto px-6 py-20 pt-28">
       <article
-        className="prose prose-invert max-w-none"
+        className="prose dark:prose-invert max-w-none"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
