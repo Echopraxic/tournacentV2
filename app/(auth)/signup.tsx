@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -278,6 +279,18 @@ export default function SignUp() {
               </View>
             )}
 
+            <View style={styles.consent}>
+              <Text style={styles.consentText}>By creating an account you agree to our </Text>
+              <TouchableOpacity onPress={() => Linking.openURL('https://tournacent.com/terms')}>
+                <Text style={styles.consentLink}>Terms of Service</Text>
+              </TouchableOpacity>
+              <Text style={styles.consentText}> and </Text>
+              <TouchableOpacity onPress={() => Linking.openURL('https://tournacent.com/privacy')}>
+                <Text style={styles.consentLink}>Privacy Policy</Text>
+              </TouchableOpacity>
+              <Text style={styles.consentText}>.</Text>
+            </View>
+
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleSignUp}
@@ -428,5 +441,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#10B981',
     fontWeight: '600',
+  },
+  consent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consentText: {
+    fontSize: 12,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  consentLink: {
+    fontSize: 12,
+    color: '#10B981',
+    lineHeight: 18,
+    textDecorationLine: 'underline',
   },
 });

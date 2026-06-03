@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -56,7 +57,7 @@ export default function Login() {
       <View style={styles.content}>
         <View style={styles.header}>
           <Image
-            source={require('../../assets/images/Tournacent Logo v2.png')}
+            source={require('../../assets/images/Tournacent logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -116,6 +117,16 @@ export default function Login() {
             <Text style={styles.footerText}>Don't have an account? </Text>
             <TouchableOpacity onPress={() => router.push('/(auth)/signup')}>
               <Text style={styles.link}>Sign Up</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.legalRow}>
+            <TouchableOpacity onPress={() => Linking.openURL('https://tournacent.com/privacy')}>
+              <Text style={styles.legalLink}>Privacy Policy</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalSep}> · </Text>
+            <TouchableOpacity onPress={() => Linking.openURL('https://tournacent.com/terms')}>
+              <Text style={styles.legalLink}>Terms of Service</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -214,5 +225,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#10B981',
     fontWeight: '600',
+  },
+  legalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  legalLink: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textDecorationLine: 'underline',
+  },
+  legalSep: {
+    fontSize: 12,
+    color: '#9CA3AF',
   },
 });

@@ -1,0 +1,31 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  /* Brand colors from constants/tokens.ts */
+  --color-primary: #00E38C;
+  --color-primary-muted: #00A86B;
+  --color-accent: #10B981;
+  --color-bg: #0B0F14;
+  --color-surface: #121821;
+  --color-text: #ffffff;
+  --color-subtext: #8A94A6;
+  --color-danger: #FF5C5C;
+  --color-border: #1E2733;
+
+  /* Border radii from constants/tokens.ts */
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-geist-sans, Arial, Helvetica, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
